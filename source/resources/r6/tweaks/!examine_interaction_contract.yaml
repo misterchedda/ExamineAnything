@@ -1,0 +1,15 @@
+MisterChedda.ExamineInteraction.meshPaths:
+  $type: array:String
+  $value: []
+
+MisterChedda.ExamineInteraction.meshPrefixes:
+  $type: array:String
+  $value: []
+
+MisterChedda.ExamineInteraction.entityPaths:
+  $type: array:String
+  $value: []
+
+MisterChedda.ExamineInteraction.entityPrefixes:
+  $type: array:String
+  $value: []

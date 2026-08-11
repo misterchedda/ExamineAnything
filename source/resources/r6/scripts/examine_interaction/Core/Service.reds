@@ -947,7 +947,7 @@ public class ExamineInteractionService extends ScriptableService {
   
     if !this.m_examinePropDiagnosticLogged {
       this.m_examinePropDiagnosticLogged = true;
-      ExamineInteractionLog.Diagnostic(s"[ExamineInteraction] PROP TARGET PROBE: entity=\(IsDefined(entityCandidate)) entityTemplate=\(ResRef.ToString(entityTemplatePath)) entityAttempts=\(entityAttempts) entityVisibilityRejects=\(entityVisibilityRejects) boundsAttempts=\(boundsAttempts) boundsPath=\(ResRef.ToString(boundsMeshPath)) physicsHit=\(hit) hitObject=\(IsDefined(hitObject)) mesh=\(ResRef.ToString(meshPath)) curated=\(this.ExamineInteractionIsCuratedProp(meshPath))");
+      ExamineInteractionLog.Diagnostic(s"[ExamineInteraction] PROP TARGET PROBE: entity=\(IsDefined(entityCandidate)) entityTemplate=\(ResRef.ToString(entityTemplatePath)) entityRegistered=\(ExamineInteractionCompatibility.IsRegisteredEntity(ResRef.ToString(entityTemplatePath))) entityAttempts=\(entityAttempts) entityVisibilityRejects=\(entityVisibilityRejects) boundsAttempts=\(boundsAttempts) boundsPath=\(ResRef.ToString(boundsMeshPath)) physicsHit=\(hit) hitObject=\(IsDefined(hitObject)) mesh=\(ResRef.ToString(meshPath)) meshRegistered=\(ExamineInteractionCompatibility.IsRegisteredMesh(ResRef.ToString(meshPath))) curated=\(this.ExamineInteractionIsCuratedProp(meshPath))");
     }
   
     if IsDefined(entityCandidate)
@@ -1041,6 +1041,10 @@ public class ExamineInteractionService extends ScriptableService {
   private final func ExamineInteractionIsCuratedEntity(templatePath: ResRef) -> Bool {
     let path = ResRef.ToString(templatePath);
 
+    if ExamineInteractionCompatibility.IsRegisteredEntity(path) {
+      return true;
+    }
+
     // Apartment memorabilia and authored stash displays are deliberately exact or directory-scoped. Broad quest/entity prefixes would make RMB focus noisy and could clone scripted quest actors or devices accidentally
     return Equals(path, "base\\quest\\main_quests\\prologue\\q001\\entities\\q001_waving_cat.ent")
       || Equals(path, "ep1\\quest\\main_quests\\q302\\entities\\q302_chimera_core\\q302_chimera_shell_memorabilia.ent")
@@ -1114,6 +1118,9 @@ public class ExamineInteractionService extends ScriptableService {
       || Equals(path, "base\\environment\\decoration\\misc\\painting\\rich_painting\\rich_painting_frame_e.mesh")
       || Equals(path, "base\\environment\\decoration\\misc\\painting\\rich_painting\\rich_painting_frame_f.mesh") {
       return false;
+    }
+    if ExamineInteractionCompatibility.IsRegisteredMesh(path) {
+      return true;
     }
     return StrBeginsWith(path, "ep1\\environment\\decoration\\advertising\\posters\\")
       || StrBeginsWith(path, "base\\environment\\decoration\\advertising\\posters\\")
