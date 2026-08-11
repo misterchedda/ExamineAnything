@@ -1056,8 +1056,8 @@ public class ExamineInteractionPopup extends CustomPopup {
       i += 1;
     }
 
-    choice.inputAction = n"";
-    choice.rawInputKey = EInputKey.IK_Escape;
+    choice.inputAction = n"cancel";
+    choice.rawInputKey = EInputKey.IK_None;
     row = new inkHorizontalPanel();
     row.SetName(n"ExamineInteractionActionExit");
     row.SetFitToContent(true);

@@ -88,10 +88,18 @@ public class ExamineInteractionSettings extends ScriptableSystem {
   @runtimeProperty("ModSettings.mod", "UI_MisterChedda_Examine_ModName")
   @runtimeProperty("ModSettings.category", "UI_MisterChedda_Examine_Category_Controls")
   @runtimeProperty("ModSettings.category.order", "4")
-  @runtimeProperty("ModSettings.displayName", "UI_MisterChedda_Examine_Key_Name")
-  @runtimeProperty("ModSettings.description", "UI_MisterChedda_Examine_Key_Description")
+  @runtimeProperty("ModSettings.displayName", "UI_MisterChedda_Examine_KeyboardKey_Name")
+  @runtimeProperty("ModSettings.description", "UI_MisterChedda_Examine_KeyboardKey_Description")
   @runtimeProperty("ModSettings.dependency", "enabled")
   public let examineKey: EInputKey = EInputKey.IK_G;
+
+  @runtimeProperty("ModSettings.mod", "UI_MisterChedda_Examine_ModName")
+  @runtimeProperty("ModSettings.category", "UI_MisterChedda_Examine_Category_Controls")
+  @runtimeProperty("ModSettings.category.order", "4")
+  @runtimeProperty("ModSettings.displayName", "UI_MisterChedda_Examine_ControllerKey_Name")
+  @runtimeProperty("ModSettings.description", "UI_MisterChedda_Examine_ControllerKey_Description")
+  @runtimeProperty("ModSettings.dependency", "enabled")
+  public let examineControllerKey: EInputKey = EInputKey.IK_Pad_LeftThumb;
 
   public static func Get(game: GameInstance) -> ref<ExamineInteractionSettings> {
     return GameInstance.GetScriptableSystemsContainer(game)

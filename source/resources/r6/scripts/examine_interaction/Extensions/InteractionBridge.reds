@@ -9,6 +9,9 @@ private let m_examineInteractionWorldPropPromptInput: ref<inkInputDisplayControl
 @addField(LootingGameController)
 private let m_examineInteractionWorldPropPromptShifted: Bool;
 
+@addField(LootingGameController)
+private let m_examineInteractionInputDeviceCallback: ref<CallbackHandle>;
+
 @addMethod(LootingGameController)
 private final func ExamineInteractionHasActiveVanillaChoices() -> Bool {
   let blackboard: ref<IBlackboard>;
@@ -188,22 +191,61 @@ public final func SetData(data: script_ref<InteractionChoiceData>, opt skillChec
 
 @wrapMethod(LootingGameController)
 protected cb func OnInitialize() -> Bool {
+  let inputBlackboard: ref<IBlackboard>;
+
   wrappedMethod();
   this.ExamineInteractionCreateWorldPropPrompt();
   let service = ExamineInteractionService.Get();
   if IsDefined(service) {
     service.AttachController(this);
   }
+
+  inputBlackboard = this.GetBlackboardSystem().Get(GetAllBlackboardDefs().InputSchemes);
+  if IsDefined(inputBlackboard) {
+    this.m_examineInteractionInputDeviceCallback = inputBlackboard.RegisterListenerUint(
+      GetAllBlackboardDefs().InputSchemes.Device,
+      this,
+      n"OnExamineInteractionInputDeviceChanged"
+    );
+  }
 }
 
 @wrapMethod(LootingGameController)
 protected cb func OnUninitialize() -> Bool {
+  let inputBlackboard = this.GetBlackboardSystem().Get(GetAllBlackboardDefs().InputSchemes);
   let service = ExamineInteractionService.Get();
+
+  if IsDefined(inputBlackboard) && IsDefined(this.m_examineInteractionInputDeviceCallback) {
+    inputBlackboard.UnregisterListenerUint(
+      GetAllBlackboardDefs().InputSchemes.Device,
+      this.m_examineInteractionInputDeviceCallback
+    );
+    this.m_examineInteractionInputDeviceCallback = null;
+  }
   if IsDefined(service) {
     service.DetachController();
   }
   this.ExamineInteractionReleaseWorldPropPrompt();
   wrappedMethod();
+}
+
+@addMethod(LootingGameController)
+private cb func OnExamineInteractionInputDeviceChanged(value: Uint32) -> Bool {
+  let data = this.m_previousData;
+  let service = ExamineInteractionService.Get();
+
+  if !IsDefined(service) {
+    return false;
+  }
+
+  service.OnInputDeviceChanged();
+  if data.isActive && service.ProcessLootData(this, data) {
+    this.m_previousData = data;
+    if IsDefined(this.m_controller) {
+      this.m_controller.SetLootData(data);
+    }
+  }
+  return true;
 }
 
 @wrapMethod(LootingGameController)

@@ -37,11 +37,12 @@ public class ExamineInteractionService extends ScriptableService {
   private let m_examinePropMissPolls: Int32;
   private let m_examinePropPromptVisible: Bool;
   private let m_examinePropDiagnosticLogged: Bool;
-  private let m_examineKey: EInputKey;
+  private let m_examineKeyboardKey: EInputKey;
+  private let m_examineControllerKey: EInputKey;
   private let m_examineItemPreviewFactory: ref<ExamineInteractionWeaponPreviewFactory>;
 
   private cb func OnLoad() {
-    this.m_examineKey = this.ResolveExamineKey();
+    this.ResolveExamineKeys();
     this.RegisterInputBindings();
     GameInstance.GetCallbackSystem().RegisterCallback(n"Session/End", this, n"OnSessionEnd");
   }
@@ -65,25 +66,76 @@ public class ExamineInteractionService extends ScriptableService {
     return !IsDefined(settings) || settings.enabled;
   }
 
-  private final func ResolveExamineKey() -> EInputKey {
+  private final func IsControllerKey(key: EInputKey) -> Bool {
+    return StrBeginsWith(
+      EnumValueToString("EInputKey", Cast<Int64>(EnumInt(key))),
+      "IK_Pad_"
+    );
+  }
+
+  private final func ResolveExamineKeys() -> Void {
     let settings = this.GetSettings();
-    if IsDefined(settings) && NotEquals(settings.examineKey, EInputKey.IK_None) {
-      return settings.examineKey;
+
+    this.m_examineKeyboardKey = EInputKey.IK_G;
+    this.m_examineControllerKey = EInputKey.IK_Pad_LeftThumb;
+    if !IsDefined(settings) {
+      return;
     }
-    return EInputKey.IK_G;
+
+    // Preserve controller keys selected through the original single-key setting before separate bindings existed
+    if NotEquals(settings.examineKey, EInputKey.IK_None) {
+      if this.IsControllerKey(settings.examineKey) {
+        this.m_examineControllerKey = settings.examineKey;
+      } else {
+        this.m_examineKeyboardKey = settings.examineKey;
+      }
+    }
+    if NotEquals(settings.examineControllerKey, EInputKey.IK_None)
+      && !this.IsControllerKey(settings.examineKey) {
+      this.m_examineControllerKey = settings.examineControllerKey;
+    }
+  }
+
+  private final func GetActiveExamineKey() -> EInputKey {
+    let blackboard = GameInstance.GetBlackboardSystem(GetGameInstance())
+      .Get(GetAllBlackboardDefs().InputSchemes);
+
+    if IsDefined(blackboard)
+      && Equals(
+        IntEnum<InputDevice>(Cast<Uint8>(blackboard.GetUint(GetAllBlackboardDefs().InputSchemes.Device))),
+        InputDevice.PAD
+      ) {
+      return this.m_examineControllerKey;
+    }
+    return this.m_examineKeyboardKey;
+  }
+
+  private final func IsExamineKey(key: EInputKey) -> Bool {
+    return Equals(key, this.m_examineKeyboardKey)
+      || Equals(key, this.m_examineControllerKey);
+  }
+
+  private final func IsPropFocusKey(key: EInputKey) -> Bool {
+    return Equals(key, EInputKey.IK_RightMouse)
+      || Equals(key, EInputKey.IK_Pad_LeftTrigger);
   }
 
   private final func RegisterInputBindings() -> Void {
-    GameInstance.GetCallbackSystem()
-      .RegisterCallback(n"Input/Key", this, n"OnExamineInteractionKey")
-      .AddTarget(InputTarget.Key(this.m_examineKey, EInputAction.IACT_Release))
-      .AddTarget(InputTarget.Key(EInputKey.IK_RightMouse));
+    let handler = GameInstance.GetCallbackSystem()
+      .RegisterCallback(n"Input/Key", this, n"OnExamineInteractionKey");
+
+    handler.AddTarget(InputTarget.Key(this.m_examineKeyboardKey, EInputAction.IACT_Release));
+    if NotEquals(this.m_examineControllerKey, this.m_examineKeyboardKey) {
+      handler.AddTarget(InputTarget.Key(this.m_examineControllerKey, EInputAction.IACT_Release));
+    }
+    handler.AddTarget(InputTarget.Key(EInputKey.IK_RightMouse));
+    handler.AddTarget(InputTarget.Key(EInputKey.IK_Pad_LeftTrigger));
   }
 
   private final func RefreshInputBindings() -> Void {
     GameInstance.GetCallbackSystem()
       .UnregisterCallback(n"Input/Key", this, n"OnExamineInteractionKey");
-    this.m_examineKey = this.ResolveExamineKey();
+    this.ResolveExamineKeys();
     this.RegisterInputBindings();
   }
 
@@ -93,7 +145,7 @@ public class ExamineInteractionService extends ScriptableService {
     if IsDefined(this.m_controller) {
       this.m_controller.ExamineInteractionSetWorldPropPrompt(
         this.m_examinePropPromptVisible,
-        this.m_examineKey
+        this.GetActiveExamineKey()
       );
     }
 
@@ -111,15 +163,30 @@ public class ExamineInteractionService extends ScriptableService {
       }
     }
 
-    FTLog(s"[ExamineInteraction] Settings applied: enabled=\(this.IsEnabled()) examineKey=\(EnumInt(this.m_examineKey)) diagnosticLogging=\(ExamineInteractionLog.DiagnosticsEnabled())");
+    FTLog(s"[ExamineInteraction] Settings applied: enabled=\(this.IsEnabled()) keyboardKey=\(EnumInt(this.m_examineKeyboardKey)) controllerKey=\(EnumInt(this.m_examineControllerKey)) diagnosticLogging=\(ExamineInteractionLog.DiagnosticsEnabled())");
   }
 
   public final func AttachController(controller: wref<LootingGameController>) -> Void {
+    let attaching = IsDefined(controller) && !IsDefined(this.m_controller);
+
     this.m_controller = controller;
     if IsDefined(controller) {
+      // Mod Settings can restore persisted values after the service itself loads, so resolve again at HUD session attach
+      if attaching {
+        this.RefreshInputBindings();
+      }
       controller.ExamineInteractionSetWorldPropPrompt(
         this.m_examinePropPromptVisible,
-        this.m_examineKey
+        this.GetActiveExamineKey()
+      );
+    }
+  }
+
+  public final func OnInputDeviceChanged() -> Void {
+    if IsDefined(this.m_controller) {
+      this.m_controller.ExamineInteractionSetWorldPropPrompt(
+        this.m_examinePropPromptVisible,
+        this.GetActiveExamineKey()
       );
     }
   }
@@ -540,7 +607,7 @@ public class ExamineInteractionService extends ScriptableService {
         return this.ExamineInteractionRefreshInjectedChoice(data);
       } else if !this.ExamineInteractionHasChoice(data) {
         examineChoice.inputAction = n"Choice3";
-        examineChoice.rawInputKey = this.m_examineKey;
+        examineChoice.rawInputKey = this.GetActiveExamineKey();
         examineChoice.isHoldAction = false;
         examineChoice.localizedName = "Gameplay-Devices-Interactions-Inspect";
         ArrayPush(data.choices, examineChoice);
@@ -664,8 +731,8 @@ public class ExamineInteractionService extends ScriptableService {
         && NotEquals(data.choices[i].rawInputKey, EInputKey.IK_None)
         && (Equals(data.choices[i].localizedName, "Gameplay-Devices-Interactions-Inspect")
           || Equals(data.choices[i].localizedName, "Examine")) {
-        if NotEquals(data.choices[i].rawInputKey, this.m_examineKey) {
-          data.choices[i].rawInputKey = this.m_examineKey;
+        if NotEquals(data.choices[i].rawInputKey, this.GetActiveExamineKey()) {
+          data.choices[i].rawInputKey = this.GetActiveExamineKey();
           changed = true;
         }
         if NotEquals(data.choices[i].localizedName, "Gameplay-Devices-Interactions-Inspect") {
@@ -702,24 +769,24 @@ public class ExamineInteractionService extends ScriptableService {
     let sourceNode: wref<worldINodeInstance>;
 
     if !this.IsEnabled() {
-      if Equals(evt.GetKey(), EInputKey.IK_RightMouse)
+      if this.IsPropFocusKey(evt.GetKey())
         && Equals(evt.GetAction(), EInputAction.IACT_Release) {
-        this.ExamineInteractionStopPropFocus("RMB released while mod disabled");
+        this.ExamineInteractionStopPropFocus("focus input released while mod disabled");
       }
       return;
     }
   
-    if Equals(evt.GetKey(), EInputKey.IK_RightMouse) {
+    if this.IsPropFocusKey(evt.GetKey()) {
       if Equals(evt.GetAction(), EInputAction.IACT_Press) {
         this.ExamineInteractionStartPropFocus();
       } else if Equals(evt.GetAction(), EInputAction.IACT_Release) {
-        this.ExamineInteractionStopPropFocus("RMB released");
+        this.ExamineInteractionStopPropFocus("focus input released");
       }
       return;
     }
   
     if this.m_examineInteractionVisible
-      && Equals(evt.GetKey(), this.m_examineKey)
+      && this.IsExamineKey(evt.GetKey())
       && Equals(evt.GetAction(), EInputAction.IACT_Release) {
       ExamineInteractionLog.Diagnostic("[ExamineInteraction] Examine pressed on world loot.");
       this.ExamineInteractionResolveItemObject();
@@ -727,7 +794,7 @@ public class ExamineInteractionService extends ScriptableService {
     }
   
     if this.m_examinePropPromptVisible
-      && Equals(evt.GetKey(), this.m_examineKey)
+      && this.IsExamineKey(evt.GetKey())
       && Equals(evt.GetAction(), EInputAction.IACT_Release) {
       sourceEntity = this.m_examineEntityCandidate;
       if IsDefined(sourceEntity)
@@ -761,7 +828,7 @@ public class ExamineInteractionService extends ScriptableService {
       return;
     }
 
-    if Equals(evt.GetKey(), this.m_examineKey)
+    if this.IsExamineKey(evt.GetKey())
       && Equals(evt.GetAction(), EInputAction.IACT_Release) {
       ExamineInteractionLog.Diagnostic(s"[ExamineInteraction] PROP CONFIRM UNHANDLED: focusHeld=\(this.m_examinePropFocusHeld) promptVisible=\(this.m_examinePropPromptVisible) focusPolls=\(this.m_examinePropFocusPolls) stablePolls=\(this.m_examinePropStablePolls) missPolls=\(this.m_examinePropMissPolls) entity=\(IsDefined(this.m_examineEntityCandidate)) mesh=\(ResRef.ToString(this.m_examinePropMeshPath))");
     }
@@ -775,7 +842,7 @@ public class ExamineInteractionService extends ScriptableService {
       return;
     }
 
-    ExamineInteractionLog.Diagnostic(s"[ExamineInteraction] PROP FOCUS INPUT: RMB press received; lootVisible=\(this.m_examineInteractionVisible) playerDefined=\(IsDefined(player))");
+    ExamineInteractionLog.Diagnostic(s"[ExamineInteraction] PROP FOCUS INPUT: focus press received; lootVisible=\(this.m_examineInteractionVisible) playerDefined=\(IsDefined(player))");
   
     if this.m_examineInteractionVisible || !IsDefined(player) {
       ExamineInteractionLog.Diagnostic("[ExamineInteraction] PROP FOCUS BLOCKED: loot UI is active or player owner is unavailable.");
@@ -1211,7 +1278,7 @@ public class ExamineInteractionService extends ScriptableService {
   private final func ExamineInteractionSetPropHint(show: Bool) -> Void {
     if Equals(show, this.m_examinePropPromptVisible) {
       if IsDefined(this.m_controller) {
-        this.m_controller.ExamineInteractionSetWorldPropPrompt(show, this.m_examineKey);
+        this.m_controller.ExamineInteractionSetWorldPropPrompt(show, this.GetActiveExamineKey());
       }
       return;
     }
@@ -1219,7 +1286,7 @@ public class ExamineInteractionService extends ScriptableService {
     this.m_examinePropPromptVisible = show;
     ExamineInteractionLog.Diagnostic(s"[ExamineInteraction] Curated prop Examine hint changed: show=\(show) stablePolls=\(this.m_examinePropStablePolls) candidatePath=\(ResRef.IsValid(this.m_examinePropMeshPath)) mesh=\(ResRef.ToString(this.m_examinePropMeshPath))");
     if IsDefined(this.m_controller) {
-      this.m_controller.ExamineInteractionSetWorldPropPrompt(show, this.m_examineKey);
+      this.m_controller.ExamineInteractionSetWorldPropPrompt(show, this.GetActiveExamineKey());
     }
   }
   
