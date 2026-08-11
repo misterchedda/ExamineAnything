@@ -41,4 +41,4 @@ Versioned artifacts are written to `dist`. The script restores the pinned Wolven
 See `LICENSE` and `native/ExamineInteractionNative/THIRD_PARTY_NOTICES.txt`
 
 ## Credits
-Big thanks to [psiberx](http://github.com/psiberx/) - Codeware, RedLib, RedHotTools, and the core mods as always (ArchiveXL, TweakXL) have been fundamental to the development of this mod. Big thanks to the [RED4Ext](https://github.com/wopss/RED4ext.SDK) maintainers and contributors as well.
+Big thanks to [psiberx](http://github.com/psiberx/) - Codeware, RedLib, RedHotTools, and the core mods as always (ArchiveXL, TweakXL) have been fundamental to the development of this mod. Big thanks to the [RED4Ext](https://github.com/wopss/RED4ext.SDK) and [redscript](https://github.com/jac3km4/redscript) maintainers and contributors as well.
