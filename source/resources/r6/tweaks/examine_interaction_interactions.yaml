@@ -1,0 +1,6 @@
+Interactions.MisterCheddaExamineSmartFrame:
+  $type: gamedataInteractionBase_Record
+  action: Choice2
+  name: MisterCheddaExamineSmartFrame
+  prereqID: ''
+  caption: LocKey#228

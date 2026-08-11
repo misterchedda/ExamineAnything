@@ -1,0 +1,4 @@
+localization:
+  onscreens:
+    en-us:
+      - misterchedda\examine_interaction\localization\en-us\onscreens\examine.json
