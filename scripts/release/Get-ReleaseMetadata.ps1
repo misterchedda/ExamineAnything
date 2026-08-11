@@ -93,8 +93,9 @@ if ($releaseNotes -notmatch '(?m)^### (Added|Changed|Deprecated|Removed|Fixed|Se
 $metadata = [pscustomobject][ordered]@{
     version = $version
     tag = "v$version"
-    releaseName = "Examine Interaction $version"
+    releaseName = "Examine Anything $version"
     releaseDate = $releaseDateText
+    packageBaseName = "ExamineAnything-v$version"
     changelog = $releaseNotes
 }
 
@@ -111,6 +112,7 @@ switch ($OutputFormat) {
         Write-GitHubOutputValue -Path $GitHubOutputFile -Name "tag" -Value $metadata.tag
         Write-GitHubOutputValue -Path $GitHubOutputFile -Name "release_name" -Value $metadata.releaseName
         Write-GitHubOutputValue -Path $GitHubOutputFile -Name "release_date" -Value $metadata.releaseDate
+        Write-GitHubOutputValue -Path $GitHubOutputFile -Name "package_base_name" -Value $metadata.packageBaseName
         Write-GitHubOutputValue -Path $GitHubOutputFile -Name "changelog" -Value $metadata.changelog
     }
     default {

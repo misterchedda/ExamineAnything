@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "isRoot": true,
+  "tools": {
+    "wolvenkit.cli": {
+      "version": "8.20.0",
+      "commands": [
+        "cp77tools"
+      ],
+      "rollForward": false
+    }
+  }
+}

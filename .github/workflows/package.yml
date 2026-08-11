@@ -1,0 +1,66 @@
+name: Package
+
+on:
+  push:
+    branches:
+      - master
+    tags:
+      - "v*"
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+concurrency:
+  group: package-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Build package
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Read release metadata
+        id: metadata
+        shell: pwsh
+        run: ./scripts/release/Get-ReleaseMetadata.ps1 -OutputFormat GitHub
+
+      - name: Validate release tag
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          ACTUAL_TAG: ${{ github.ref_name }}
+          EXPECTED_TAG: ${{ steps.metadata.outputs.tag }}
+        run: |
+          if ($env:ACTUAL_TAG -ne $env:EXPECTED_TAG) {
+            throw "Tag '$env:ACTUAL_TAG' does not match VERSION tag '$env:EXPECTED_TAG'."
+          }
+
+      - name: Build distributable package
+        id: package
+        shell: pwsh
+        run: ./scripts/release/Build-Package.ps1
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ${{ steps.metadata.outputs.package_base_name }}
+          path: |
+            ${{ steps.package.outputs.package_path }}
+            ${{ steps.package.outputs.checksum_path }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14

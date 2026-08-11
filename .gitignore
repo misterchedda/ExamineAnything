@@ -20,3 +20,4 @@ analysis/
 source/raw/
 native/ExamineInteractionNative/build
 CMakeUserPresets.json
+dist/

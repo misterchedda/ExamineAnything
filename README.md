@@ -26,6 +26,15 @@ cmake --build native/ExamineInteractionNative/build --config Release --target Ex
 
 CMake fetches the pinned RED4ext.SDK and [RedLib](https://github.com/psiberx/cp2077-red-lib) revisions automatically. An existing RED4ext.SDK checkout can instead be supplied with `-DRED4EXT_SDK_ROOT=C:/path/to/RED4ext.SDK` or the `RED4EXT_SDK_ROOT` environment variable.
 
+## Packaging
+
+Build the native plugin and create the complete game-root ZIP and SHA-256 file with:
+
+```powershell
+pwsh -File scripts/release/Build-Package.ps1
+```
+
+Versioned artifacts are written to `dist`. The script restores the pinned WolvenKit.CLI tool, packs the archive resources, and validates the final ZIP layout.
 
 ## License
 
