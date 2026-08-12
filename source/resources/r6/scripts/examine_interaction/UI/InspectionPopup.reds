@@ -27,8 +27,11 @@ public class ExamineInteractionPopup extends CustomPopup {
   private let m_hasLocalPivot: Bool;
   private let m_previewHalfExtents: Vector4;
   private let m_previewRadius: Float;
+  private let m_previewScale: Float = 1.0;
   private let m_distance: Float;
   private let m_framedDistance: Float;
+  private let m_environmentHitDistance: Float;
+  private let m_previewBoundsPrepared: Bool;
   private let m_pitchOffset: Float;
   private let m_yawOffset: Float;
   private let m_dragging: Bool;
@@ -1613,10 +1616,13 @@ public class ExamineInteractionPopup extends CustomPopup {
     if IsDefined(preview)
       && EntityID.IsDefined(this.m_previewEntityID)
       && Equals(preview.GetEntityID(), this.m_previewEntityID) {
-      if this.m_worldMeshPreview && !this.ConfigureWorldMeshPreview(preview) {
-        FTLog("[ExamineInteraction] World-mesh preview failed: generic mesh component could not be configured.");
-        this.Close();
-        return;
+      if this.m_worldMeshPreview {
+        this.PrepareWorldMeshPreview(preview);
+        if !this.ConfigureWorldMeshPreview(preview) {
+          FTLog("[ExamineInteraction] World-mesh preview failed: generic mesh component could not be configured.");
+          this.Close();
+          return;
+        }
       }
       this.CopyWorldEntityRuntimeState(preview);
       this.FinalizePreview(preview);
@@ -1645,6 +1651,9 @@ public class ExamineInteractionPopup extends CustomPopup {
   private final func ChangePreviewDistance(delta: Float) -> Void {
     let maxDistance = MaxF(1.50, this.m_framedDistance * 1.75);
 
+    if this.m_environmentHitDistance > 0.0 {
+      maxDistance = MinF(maxDistance, this.GetEnvironmentMaxPreviewDistance());
+    }
     this.m_distance = ClampF(this.m_distance + delta, 0.20, maxDistance);
     this.ApplyPreviewTransform();
     this.ApplyPreviewDOF();
@@ -1712,6 +1721,38 @@ public class ExamineInteractionPopup extends CustomPopup {
     projectedHalfWidth = AbsF(transformedX.X) + AbsF(transformedY.X) + AbsF(transformedZ.X);
     projectedHalfHeight = AbsF(transformedX.Z) + AbsF(transformedY.Z) + AbsF(transformedZ.Z);
     return SqrtF(projectedHalfWidth * projectedHalfWidth + projectedHalfHeight * projectedHalfHeight);
+  }
+
+  private final func CalculatePreviewForwardHalfDepth() -> Float {
+    let axis: Vector4;
+    let manualOrientation: EulerAngles;
+    let relativeOrientation: Quaternion;
+    let transformedX: Vector4;
+    let transformedY: Vector4;
+    let transformedZ: Vector4;
+
+    manualOrientation.Pitch = this.m_pitchOffset;
+    manualOrientation.Yaw = this.m_yawOffset;
+    relativeOrientation = EulerAngles.ToQuat(manualOrientation) * this.m_sourceOrientation;
+
+    axis.X = this.m_previewHalfExtents.X;
+    transformedX = Quaternion.Transform(relativeOrientation, axis);
+    axis.X = 0.0;
+    axis.Y = this.m_previewHalfExtents.Y;
+    transformedY = Quaternion.Transform(relativeOrientation, axis);
+    axis.Y = 0.0;
+    axis.Z = this.m_previewHalfExtents.Z;
+    transformedZ = Quaternion.Transform(relativeOrientation, axis);
+
+    return AbsF(transformedX.Y) + AbsF(transformedY.Y) + AbsF(transformedZ.Y);
+  }
+
+  private final func GetEnvironmentMaxPreviewDistance() -> Float {
+    if this.m_environmentHitDistance <= 0.0 {
+      return MaxF(1.50, this.m_framedDistance * 1.75);
+    }
+
+    return MaxF(0.20, this.m_environmentHitDistance - this.CalculatePreviewForwardHalfDepth() - 0.06);
   }
 
   private final func InitializeDynamicPreviewFOV() -> Void {
@@ -1848,9 +1889,12 @@ public class ExamineInteractionPopup extends CustomPopup {
       this.RegisterPreviewAttachCallback();
       preview = staticEntitySystem.GetEntity(previewID);
       if IsDefined(preview) {
-        if this.m_worldMeshPreview && !this.ConfigureWorldMeshPreview(preview) {
-          FTLog("[ExamineInteraction] World-mesh preview is attached but its mesh component could not be configured yet.");
-          return;
+        if this.m_worldMeshPreview {
+          this.PrepareWorldMeshPreview(preview);
+          if !this.ConfigureWorldMeshPreview(preview) {
+            FTLog("[ExamineInteraction] World-mesh preview is attached but its mesh component could not be configured yet.");
+            return;
+          }
         }
         this.FinalizePreview(preview);
       }
@@ -1920,7 +1964,12 @@ public class ExamineInteractionPopup extends CustomPopup {
 
     this.m_previewReady = true;
     this.UnregisterPreviewAttachCallback();
-    this.ResolvePreviewPivot(preview);
+    if !this.m_borrowedWorldWeapon && !this.m_worldMeshPreview {
+      this.DisablePreviewCollision(preview);
+    }
+    if !this.m_previewBoundsPrepared {
+      this.ResolvePreviewPivot(preview);
+    }
     if this.m_worldEntityPreview {
       entityPath = StrLower(ResRef.ToString(this.m_templatePath));
       if StrFindFirst(entityPath, "\\stash_weapons\\") >= 0 {
@@ -1943,9 +1992,6 @@ public class ExamineInteractionPopup extends CustomPopup {
     this.InitializeDynamicPreviewFOV();
     this.ApplyPreviewDOF();
     this.SpawnPreviewLight();
-    if !this.m_borrowedWorldWeapon {
-      this.DisablePreviewCollision(preview);
-    }
     if this.m_transactionPreview && IsDefined(this.m_transactionPreviewOwner) {
       transformRoot = this.m_transactionPreviewOwner;
       if !this.m_borrowedWorldWeapon {
@@ -1987,6 +2033,7 @@ public class ExamineInteractionPopup extends CustomPopup {
     while i < ArraySize(components) {
       meshComponent = components[i] as MeshComponent;
       if IsDefined(meshComponent) {
+        meshComponent.visualScale = Vector3(this.m_previewScale, this.m_previewScale, this.m_previewScale);
         meshComponent.meshAppearance = this.m_worldMeshAppearance;
         if Equals(meshComponent.meshAppearance, n"") {
           meshComponent.meshAppearance = n"default";
@@ -2000,6 +2047,102 @@ public class ExamineInteractionPopup extends CustomPopup {
     }
 
     return false;
+  }
+
+  private final func PrepareWorldMeshPreview(preview: ref<Entity>) -> Void {
+    if this.m_previewBoundsPrepared || !this.m_worldMeshPreview || !IsDefined(preview) {
+      return;
+    }
+
+    this.DisablePreviewCollision(preview);
+    this.ResolvePreviewPivot(preview);
+    this.ResolveWorldMeshEnvironmentFraming();
+    this.m_previewBoundsPrepared = true;
+  }
+
+  private final func ResolveWorldMeshEnvironmentFraming() -> Void {
+    let availableDepth: Float;
+    let cameraForward: Vector4;
+    let cameraPosition: Vector4;
+    let cameraTransform: Transform;
+    let desiredDistance: Float;
+    let forwardHalfDepth: Float;
+    let hitDelta: Vector4;
+    let hitDistance: Float;
+    let hitPosition: Vector4;
+    let minimumDistance: Float = 0.20;
+    let minimumScale: Float = 0.20;
+    let newDistance: Float;
+    let preservedDistance: Float;
+    let queryEnd: Vector4;
+    let queryStart: Vector4;
+    let scale: Float;
+    let traceResult: TraceResult;
+    let spatialQueries = GameInstance.GetSpatialQueriesSystem(this.GetGame());
+
+    if !this.m_worldMeshPreview
+      || !this.m_hasLocalPivot
+      || this.m_previewRadius <= 0.0
+      || !IsDefined(spatialQueries)
+      || !GameInstance.GetCameraSystem(this.GetGame()).GetActiveCameraWorldTransform(cameraTransform) {
+      return;
+    }
+
+    cameraPosition = Transform.GetPosition(cameraTransform);
+    cameraForward = Transform.GetForward(cameraTransform);
+    queryStart = cameraPosition + cameraForward * 0.05;
+    queryEnd = cameraPosition + cameraForward * 3.0;
+    if !spatialQueries.SyncRaycastByCollisionPreset(
+      queryStart,
+      queryEnd,
+      n"World Static",
+      traceResult,
+      true,
+      false
+    ) || !TraceResult.IsValid(traceResult) {
+      ExamineInteractionLog.Diagnostic("[ExamineInteraction] World-mesh environment framing found no static obstruction ahead.");
+      return;
+    }
+
+    hitPosition.X = traceResult.position.X;
+    hitPosition.Y = traceResult.position.Y;
+    hitPosition.Z = traceResult.position.Z;
+    hitPosition.W = 1.0;
+    hitDelta = hitPosition - cameraPosition;
+    hitDistance = hitDelta.X * cameraForward.X
+      + hitDelta.Y * cameraForward.Y
+      + hitDelta.Z * cameraForward.Z;
+    if hitDistance <= 0.08 {
+      ExamineInteractionLog.Diagnostic(s"[ExamineInteraction] World-mesh environment framing ignored an invalid near-camera hit: distance=\(hitDistance)");
+      return;
+    }
+
+    desiredDistance = MaxF(this.m_distance, minimumDistance);
+    forwardHalfDepth = this.CalculatePreviewForwardHalfDepth();
+    this.m_environmentHitDistance = hitDistance;
+    if desiredDistance + forwardHalfDepth + 0.06 <= hitDistance {
+      ExamineInteractionLog.Diagnostic(s"[ExamineInteraction] World-mesh environment framing already fits: hit=\(hitDistance) distance=\(desiredDistance) depth=\(forwardHalfDepth)");
+      return;
+    }
+
+    preservedDistance = (hitDistance - 0.06) / (1.0 + forwardHalfDepth / desiredDistance);
+    if preservedDistance >= minimumDistance {
+      newDistance = MinF(desiredDistance, preservedDistance);
+      scale = ClampF(newDistance / desiredDistance, minimumScale, 1.0);
+    } else {
+      newDistance = minimumDistance;
+      availableDepth = hitDistance - 0.06 - newDistance;
+      scale = forwardHalfDepth > 0.001
+        ? ClampF(availableDepth / forwardHalfDepth, minimumScale, 1.0)
+        : 1.0;
+    }
+
+    this.m_previewScale = scale;
+    this.m_distance = newDistance;
+    this.m_localPivot = this.m_localPivot * scale;
+    this.m_previewHalfExtents = this.m_previewHalfExtents * scale;
+    this.m_previewRadius *= scale;
+    ExamineInteractionLog.Diagnostic(s"[ExamineInteraction] World-mesh environment framing constrained: hit=\(hitDistance) originalDistance=\(desiredDistance) distance=\(newDistance) originalDepth=\(forwardHalfDepth) scale=\(scale)");
   }
 
   private final func RestoreSourceWorldNode() -> Void {
@@ -2505,7 +2648,10 @@ public class ExamineInteractionPopup extends CustomPopup {
     this.m_previewHalfExtents.Y = 0.0;
     this.m_previewHalfExtents.Z = 0.0;
     this.m_previewRadius = 0.0;
+    this.m_previewScale = 1.0;
     this.m_framedDistance = 0.0;
+    this.m_environmentHitDistance = 0.0;
+    this.m_previewBoundsPrepared = false;
     FTLog("[ExamineInteraction] Inspection mode closed and preview despawned.");
   }
 }
