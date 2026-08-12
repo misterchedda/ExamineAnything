@@ -39,6 +39,8 @@ public class ExamineInteractionService extends ScriptableService {
   private let m_examinePropDiagnosticLogged: Bool;
   private let m_examineKeyboardKey: EInputKey;
   private let m_examineControllerKey: EInputKey;
+  private let m_examineWalkSuppressionArmed: Bool;
+  private let m_examineWalkSuppressionGeneration: Uint32;
   private let m_examineItemPreviewFactory: ref<ExamineInteractionWeaponPreviewFactory>;
 
   private cb func OnLoad() {
@@ -124,6 +126,7 @@ public class ExamineInteractionService extends ScriptableService {
     let handler = GameInstance.GetCallbackSystem()
       .RegisterCallback(n"Input/Key", this, n"OnExamineInteractionKey");
 
+    handler.AddTarget(InputTarget.Key(this.m_examineKeyboardKey, EInputAction.IACT_Press));
     handler.AddTarget(InputTarget.Key(this.m_examineKeyboardKey, EInputAction.IACT_Release));
     if NotEquals(this.m_examineControllerKey, this.m_examineKeyboardKey) {
       handler.AddTarget(InputTarget.Key(this.m_examineControllerKey, EInputAction.IACT_Release));
@@ -135,8 +138,54 @@ public class ExamineInteractionService extends ScriptableService {
   private final func RefreshInputBindings() -> Void {
     GameInstance.GetCallbackSystem()
       .UnregisterCallback(n"Input/Key", this, n"OnExamineInteractionKey");
+    this.ClearExamineWalkSuppression();
     this.ResolveExamineKeys();
     this.RegisterInputBindings();
+  }
+
+  private final func ArmExamineWalkSuppression() -> Void {
+    if NotEquals(this.m_examineKeyboardKey, EInputKey.IK_G) {
+      return;
+    }
+
+    this.m_examineWalkSuppressionArmed = true;
+    this.m_examineWalkSuppressionGeneration += 1u;
+    ExamineInteractionLog.Diagnostic("[ExamineInteraction] Armed one-shot vanilla ToggleWalk suppression for Examine on G.");
+  }
+
+  private final func ScheduleExamineWalkSuppressionExpiry() -> Void {
+    if !this.m_examineWalkSuppressionArmed {
+      return;
+    }
+
+    GameInstance.GetDelaySystem(GetGameInstance()).DelayCallback(
+      ExamineInteractionWalkSuppressionExpiry.Create(this, this.m_examineWalkSuppressionGeneration),
+      0.10,
+      false
+    );
+  }
+
+  private final func ClearExamineWalkSuppression() -> Void {
+    this.m_examineWalkSuppressionArmed = false;
+    this.m_examineWalkSuppressionGeneration += 1u;
+  }
+
+  public final func ExpireExamineWalkSuppression(generation: Uint32) -> Void {
+    if this.m_examineWalkSuppressionArmed
+      && Equals(generation, this.m_examineWalkSuppressionGeneration) {
+      this.ClearExamineWalkSuppression();
+      ExamineInteractionLog.Diagnostic("[ExamineInteraction] Examine ToggleWalk suppression expired without receiving the vanilla action.");
+    }
+  }
+
+  public final func ConsumeExamineWalkSuppression() -> Bool {
+    if !this.m_examineWalkSuppressionArmed {
+      return false;
+    }
+
+    this.ClearExamineWalkSuppression();
+    ExamineInteractionLog.Diagnostic("[ExamineInteraction] Suppressed vanilla ToggleWalk triggered by Examine on G.");
+    return true;
   }
 
   public final func OnSettingsChanged() -> Void {
@@ -215,6 +264,7 @@ public class ExamineInteractionService extends ScriptableService {
 
   public final func DetachController() -> Void {
     this.ExamineInteractionStopPropFocus("looting controller detached");
+    this.ClearExamineWalkSuppression();
     if IsDefined(this.m_examineItemPreviewFactory) {
       this.m_examineItemPreviewFactory.Abort();
       this.m_examineItemPreviewFactory = null;
@@ -784,6 +834,19 @@ public class ExamineInteractionService extends ScriptableService {
       }
       return;
     }
+
+    if Equals(evt.GetKey(), this.m_examineKeyboardKey)
+      && Equals(evt.GetAction(), EInputAction.IACT_Press) {
+      if this.m_examineInteractionVisible || this.m_examinePropPromptVisible {
+        this.ArmExamineWalkSuppression();
+      }
+      return;
+    }
+
+    if Equals(evt.GetKey(), this.m_examineKeyboardKey)
+      && Equals(evt.GetAction(), EInputAction.IACT_Release) {
+      this.ScheduleExamineWalkSuppressionExpiry();
+    }
   
     if this.m_examineInteractionVisible
       && this.IsExamineKey(evt.GetKey())
@@ -928,17 +991,7 @@ public class ExamineInteractionService extends ScriptableService {
       // Prefer a real authored entity over its individual mesh components. This is what apartment memorabilia and stash display weapons need: cloning the full template preserves authored multi-mesh composition and rigging
       lookedAtObject = GameInstance.GetTargetingSystem(player.GetGame())
         .GetLookAtObject(player, true, true);
-      entityCandidate = lookedAtObject as Entity;
-
-      if !IsDefined(entityCandidate) {
-        endPosition = startPosition + aimForward * 3.0;
-        hit = GameInstance.GetSpatialQueriesSystem(player.GetGame())
-          .SyncRaycastByCollisionGroup(startPosition, endPosition, n"Dynamic", trace, true, false);
-        if hit {
-          hitObject = TraceResult.GetHitObject(trace);
-          entityCandidate = hitObject as Entity;
-        }
-      }
+      entityCandidate = lookedAtObject;
 
       if IsDefined(entityCandidate) {
         entityTemplatePath = entityCandidate.GetTemplatePath();

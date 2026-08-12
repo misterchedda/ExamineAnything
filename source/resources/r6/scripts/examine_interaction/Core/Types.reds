@@ -18,6 +18,24 @@ public class ExamineInteractionPropFocusPoll extends DelayCallback {
   }
 }
 
+public class ExamineInteractionWalkSuppressionExpiry extends DelayCallback {
+  private let m_service: wref<ExamineInteractionService>;
+  private let m_generation: Uint32;
+
+  public static func Create(service: wref<ExamineInteractionService>, generation: Uint32) -> ref<ExamineInteractionWalkSuppressionExpiry> {
+    let callback = new ExamineInteractionWalkSuppressionExpiry();
+    callback.m_service = service;
+    callback.m_generation = generation;
+    return callback;
+  }
+
+  public func Call() -> Void {
+    if IsDefined(this.m_service) {
+      this.m_service.ExpireExamineWalkSuppression(this.m_generation);
+    }
+  }
+}
+
 public class ExamineInteractionLootActionContext extends IScriptable {
   public let ownerID: EntityID;
   public let itemID: ItemID;

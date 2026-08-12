@@ -260,3 +260,18 @@ protected cb func OnUpdateData(value: Variant) -> Bool {
 
   wrappedMethod(value);
 }
+
+@wrapMethod(PlayerPuppet)
+protected cb func OnAction(action: ListenerAction, consumer: ListenerActionConsumer) -> Bool {
+  let service: ref<ExamineInteractionService>;
+
+  if Equals(ListenerAction.GetName(action), n"ToggleWalk")
+    && ListenerAction.IsButtonJustReleased(action) {
+    service = ExamineInteractionService.Get();
+    if IsDefined(service) && service.ConsumeExamineWalkSuppression() {
+      return true;
+    }
+  }
+
+  return wrappedMethod(action, consumer);
+}
