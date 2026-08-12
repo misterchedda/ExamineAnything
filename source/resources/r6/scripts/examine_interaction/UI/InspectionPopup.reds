@@ -18,10 +18,13 @@ public class ExamineInteractionPopup extends CustomPopup {
   private let m_hiddenSourceVisuals: array<CName>;
   private let m_sourceVisualsHidden: Bool;
   private let m_sourceOrientation: Quaternion;
+  private let m_sourceWorldScale: Vector3;
+  private let m_profileScaleMultiplier: Float = 1.0;
   private let m_cameraOrientation: Quaternion;
   private let m_previewEntityID: EntityID;
   private let m_previewLightEntityID: EntityID;
   private let m_previewReady: Bool;
+  private let m_previewRenderingPlaneApplied: Bool;
   private let m_previewAttachCallbackRegistered: Bool;
   private let m_localPivot: Vector4;
   private let m_hasLocalPivot: Bool;
@@ -55,6 +58,7 @@ public class ExamineInteractionPopup extends CustomPopup {
   private let m_worldMeshPath: ResRef;
   private let m_worldMeshAppearance: CName;
   private let m_cameraLocalFacingFlip: Bool;
+  private let m_worldPosterPreview: Bool;
   private let m_worldMeshGrouped: Bool;
   private let m_worldMeshSelectionIndex: Int32;
   private let m_worldMeshSelectionCount: Int32;
@@ -68,6 +72,7 @@ public class ExamineInteractionPopup extends CustomPopup {
   private let m_inspectionTierColor: HDRColor;
   private let m_inspectionTextCategory: ExamineInspectionTextCategory;
   private let m_hasAuthoredScannerText: Bool;
+  private let m_hasAuthoredProfileText: Bool;
   private let m_inventoryCapacityWarning: Bool;
   private let m_hintRoot: ref<inkCanvas>;
   private let m_keyboardHint: ref<inkHorizontalPanel>;
@@ -137,7 +142,10 @@ public class ExamineInteractionPopup extends CustomPopup {
   }
 
   public static func ShowWorldMesh(sourceNode: wref<worldINodeInstance>, meshPath: ResRef, meshAppearance: CName, requester: wref<inkGameController>) -> Void {
-    let neutralOrientation: EulerAngles;
+    let meshPathText: String;
+    let profile: ref<ExamineInteractionMeshProfile>;
+    let profileID: String;
+    let profileOrientation: EulerAngles;
     let popup: ref<ExamineInteractionPopup>;
     let staticEntitySystem = GameInstance.GetStaticEntitySystem();
 
@@ -154,16 +162,32 @@ public class ExamineInteractionPopup extends CustomPopup {
     popup.m_worldMeshPreview = true;
     popup.m_worldMeshPath = meshPath;
     popup.m_worldMeshAppearance = meshAppearance;
-    popup.ConfigureWorldMeshInformation(meshPath);
+    meshPathText = StrLower(ResRef.ToString(meshPath));
+    popup.m_worldPosterPreview = StrBeginsWith(meshPathText, "base\\environment\\decoration\\advertising\\posters\\")
+      || StrBeginsWith(meshPathText, "ep1\\environment\\decoration\\advertising\\posters\\");
+    popup.m_cameraLocalFacingFlip = popup.m_worldPosterPreview;
+    profile = ExamineInteractionCompatibility.ResolveMeshProfile(meshPathText);
+    popup.ConfigureWorldMeshInformation(meshPath, profile);
     popup.m_sourceWorldNode = sourceNode;
     popup.m_worldMeshGrouped = IsWorldNodeGrouped(sourceNode);
     popup.m_worldMeshSelectionIndex = GetWorldNodeSelectionIndex(sourceNode);
     popup.m_worldMeshSelectionCount = GetWorldNodeSelectionCount(sourceNode);
     popup.m_templatePath = r"misterchedda\\examine_interaction\\entities\\examine_mesh_preview.ent";
     popup.m_appearanceName = n"None";
-    popup.m_sourceOrientation = EulerAngles.ToQuat(neutralOrientation);
+    popup.m_sourceWorldScale = GetWorldNodeScale(sourceNode);
+    popup.NormalizeWorldMeshScale();
+    if IsDefined(profile) {
+      profileID = profile.id;
+      profileOrientation.Pitch = profile.pitch;
+      profileOrientation.Yaw = profile.yaw;
+      profileOrientation.Roll = profile.roll;
+      popup.m_sourceOrientation = EulerAngles.ToQuat(profileOrientation);
+      popup.m_profileScaleMultiplier = profile.scaleMultiplier;
+    } else {
+      popup.m_sourceOrientation = EulerAngles.ToQuat(profileOrientation);
+    }
     popup.m_distance = 0.42;
-    ExamineInteractionLog.Diagnostic(s"[ExamineInteraction] World prop presentation configured: cameraLocalFlip=false grouped=\(popup.m_worldMeshGrouped) selection=\(popup.m_worldMeshSelectionIndex)/\(popup.m_worldMeshSelectionCount) mesh=\(ResRef.ToString(meshPath))");
+    ExamineInteractionLog.Diagnostic(s"[ExamineInteraction] World prop presentation configured: profile=\(profileID) poster=\(popup.m_worldPosterPreview) cameraLocalFlip=\(popup.m_cameraLocalFacingFlip) rotation=\(profileOrientation.Pitch),\(profileOrientation.Yaw),\(profileOrientation.Roll) worldScale=\(popup.m_sourceWorldScale.X),\(popup.m_sourceWorldScale.Y),\(popup.m_sourceWorldScale.Z) profileScale=\(popup.m_profileScaleMultiplier) grouped=\(popup.m_worldMeshGrouped) selection=\(popup.m_worldMeshSelectionIndex)/\(popup.m_worldMeshSelectionCount) mesh=\(ResRef.ToString(meshPath))");
     popup.Open(requester);
   }
 
@@ -557,14 +581,33 @@ public class ExamineInteractionPopup extends CustomPopup {
     return StrFrontToUpper(StrReplace(stem, "_", " "));
   }
 
-  private func ConfigureWorldMeshInformation(meshPath: ResRef) -> Void {
-    let overrideName = ExamineInteractionWorldPropNames.Resolve(meshPath);
+  private func ConfigureWorldMeshInformation(meshPath: ResRef, opt profile: ref<ExamineInteractionMeshProfile>) -> Void {
+    let overrideName = IsDefined(profile) && IsStringValid(profile.name)
+      ? profile.name
+      : ExamineInteractionWorldPropNames.Resolve(meshPath);
 
     this.m_inspectionTextCategory = ExamineInspectionTextCategory.WorldProp;
     this.m_inspectionTitle = IsStringValid(overrideName)
       ? overrideName
       : this.FormatWorldMeshName(meshPath);
+    if IsDefined(profile) && IsStringValid(profile.description) {
+      this.m_inspectionDescription = profile.description;
+    }
+    this.m_hasAuthoredProfileText = IsDefined(profile)
+      && (IsStringValid(profile.name) || IsStringValid(profile.description));
     this.m_inspectionType = "";
+  }
+
+  private func NormalizeWorldMeshScale() -> Void {
+    if AbsF(this.m_sourceWorldScale.X) < 0.001 {
+      this.m_sourceWorldScale.X = 1.0;
+    }
+    if AbsF(this.m_sourceWorldScale.Y) < 0.001 {
+      this.m_sourceWorldScale.Y = 1.0;
+    }
+    if AbsF(this.m_sourceWorldScale.Z) < 0.001 {
+      this.m_sourceWorldScale.Z = 1.0;
+    }
   }
 
   private func ApplyWorldEntityScannerRecord(recordID: TweakDBID) -> Bool {
@@ -836,12 +879,7 @@ public class ExamineInteractionPopup extends CustomPopup {
     title.SetTintColor(whiteGlowy);
     title.Reparent(panel);
 
-    if this.m_worldMeshPreview {
-      title.SetHorizontalAlignment(textHorizontalAlignment.Center);
-      return;
-    }
-
-    if this.m_worldEntityPreview {
+    if this.m_worldMeshPreview || this.m_worldEntityPreview {
       title.SetHorizontalAlignment(textHorizontalAlignment.Center);
       if IsStringValid(this.m_inspectionDescription) {
         description = new inkText();
@@ -1074,7 +1112,8 @@ public class ExamineInteractionPopup extends CustomPopup {
   private func IsInspectionTextEnabled() -> Bool {
     let settings = ExamineInteractionSettings.Get(this.GetGame());
 
-    if this.m_worldEntityPreview && this.m_hasAuthoredScannerText {
+    if (this.m_worldEntityPreview && this.m_hasAuthoredScannerText)
+      || (this.m_worldMeshPreview && this.m_hasAuthoredProfileText) {
       return true;
     }
 
@@ -1624,6 +1663,7 @@ public class ExamineInteractionPopup extends CustomPopup {
           return;
         }
       }
+      this.ApplyPreviewRenderingPlane(preview);
       this.CopyWorldEntityRuntimeState(preview);
       this.FinalizePreview(preview);
     }
@@ -1870,8 +1910,8 @@ public class ExamineInteractionPopup extends CustomPopup {
     cameraEuler = Quaternion.ToEulerAngles(this.m_cameraOrientation);
     if this.m_cameraLocalFacingFlip {
       relativeOrientation.Yaw = 180.0;
-      this.m_sourceOrientation = EulerAngles.ToQuat(relativeOrientation);
-      ExamineInteractionLog.Diagnostic("[ExamineInteraction] Camera-local entity facing flip applied: yaw=180.000000");
+      this.m_sourceOrientation = EulerAngles.ToQuat(relativeOrientation) * this.m_sourceOrientation;
+      ExamineInteractionLog.Diagnostic("[ExamineInteraction] Camera-local front-facing flip applied: yaw=180.000000");
     }
     spawnOrientation = this.m_cameraOrientation * this.m_sourceOrientation;
 
@@ -1896,6 +1936,8 @@ public class ExamineInteractionPopup extends CustomPopup {
             return;
           }
         }
+        this.ApplyPreviewRenderingPlane(preview);
+        this.CopyWorldEntityRuntimeState(preview);
         this.FinalizePreview(preview);
       }
       FTLog(s"[ExamineInteraction] Inspection mode opened: id=\(EntityID.ToDebugString(previewID)) template=\(ResRef.ToString(spec.templatePath)) appearance=\(NameToString(spec.appearanceName)) cameraPitch=\(cameraEuler.Pitch) cameraYaw=\(cameraEuler.Yaw)");
@@ -1964,6 +2006,7 @@ public class ExamineInteractionPopup extends CustomPopup {
 
     this.m_previewReady = true;
     this.UnregisterPreviewAttachCallback();
+    this.ApplyPreviewRenderingPlane(preview);
     if !this.m_borrowedWorldWeapon && !this.m_worldMeshPreview {
       this.DisablePreviewCollision(preview);
     }
@@ -2033,7 +2076,12 @@ public class ExamineInteractionPopup extends CustomPopup {
     while i < ArraySize(components) {
       meshComponent = components[i] as MeshComponent;
       if IsDefined(meshComponent) {
-        meshComponent.visualScale = Vector3(this.m_previewScale, this.m_previewScale, this.m_previewScale);
+        meshComponent.visualScale = Vector3(
+          this.m_sourceWorldScale.X * this.m_profileScaleMultiplier * this.m_previewScale,
+          this.m_sourceWorldScale.Y * this.m_profileScaleMultiplier * this.m_previewScale,
+          this.m_sourceWorldScale.Z * this.m_profileScaleMultiplier * this.m_previewScale
+        );
+        meshComponent.renderingPlane = ERenderingPlane.RPl_Weapon;
         meshComponent.meshAppearance = this.m_worldMeshAppearance;
         if Equals(meshComponent.meshAppearance, n"") {
           meshComponent.meshAppearance = n"default";
@@ -2056,8 +2104,36 @@ public class ExamineInteractionPopup extends CustomPopup {
 
     this.DisablePreviewCollision(preview);
     this.ResolvePreviewPivot(preview);
-    this.ResolveWorldMeshEnvironmentFraming();
     this.m_previewBoundsPrepared = true;
+  }
+
+  private final func ApplyPreviewRenderingPlane(preview: ref<Entity>) -> Void {
+    let components: array<ref<IComponent>>;
+    let i: Int32;
+    let meshComponent: ref<MeshComponent>;
+    let reloaded: Int32;
+    let updated: Int32;
+
+    if this.m_previewRenderingPlaneApplied
+      || !IsDefined(preview)
+      || (!this.m_worldMeshPreview && !this.m_worldEntityPreview) {
+      return;
+    }
+
+    components = preview.GetComponents();
+    while i < ArraySize(components) {
+      meshComponent = components[i] as MeshComponent;
+      if IsDefined(meshComponent) {
+        meshComponent.renderingPlane = ERenderingPlane.RPl_Weapon;
+        if this.m_worldEntityPreview && meshComponent.LoadAppearance(true) {
+          reloaded += 1;
+        }
+        updated += 1;
+      }
+      i += 1;
+    }
+    this.m_previewRenderingPlaneApplied = updated > 0;
+    ExamineInteractionLog.Diagnostic(s"[ExamineInteraction] Preview foreground rendering plane applied: meshComponents=\(updated) appearancesReloaded=\(reloaded)");
   }
 
   private final func ResolveWorldMeshEnvironmentFraming() -> Void {
@@ -2190,9 +2266,12 @@ public class ExamineInteractionPopup extends CustomPopup {
     let ix: Int32;
     let iy: Int32;
     let iz: Int32;
+    let localOrientation: EulerAngles;
+    let localPosition: Vector4;
     let mesh: ref<CMesh>;
     let meshComponent: ref<MeshComponent>;
     let meshPath: ResRef;
+    let meshPathText: String;
     let placedComponent: ref<IPlacedComponent>;
     let pointInRoot: Vector4;
     let radius: Float;
@@ -2213,8 +2292,41 @@ public class ExamineInteractionPopup extends CustomPopup {
       if authoredBounds.Max.X > authoredBounds.Min.X
         && authoredBounds.Max.Y > authoredBounds.Min.Y
         && authoredBounds.Max.Z > authoredBounds.Min.Z {
-        boundsMin = authoredBounds.Min;
-        boundsMax = authoredBounds.Max;
+        framedDistance = ClampF(
+          SqrtF(
+            (authoredBounds.Max.X - authoredBounds.Min.X) * (authoredBounds.Max.X - authoredBounds.Min.X)
+            + (authoredBounds.Max.Y - authoredBounds.Min.Y) * (authoredBounds.Max.Y - authoredBounds.Min.Y)
+            + (authoredBounds.Max.Z - authoredBounds.Min.Z) * (authoredBounds.Max.Z - authoredBounds.Min.Z)
+          ) * 0.9,
+          0.30,
+          1.20
+        );
+        boundsMin.X = MinF(
+          authoredBounds.Min.X * this.m_sourceWorldScale.X * this.m_profileScaleMultiplier,
+          authoredBounds.Max.X * this.m_sourceWorldScale.X * this.m_profileScaleMultiplier
+        );
+        boundsMin.Y = MinF(
+          authoredBounds.Min.Y * this.m_sourceWorldScale.Y * this.m_profileScaleMultiplier,
+          authoredBounds.Max.Y * this.m_sourceWorldScale.Y * this.m_profileScaleMultiplier
+        );
+        boundsMin.Z = MinF(
+          authoredBounds.Min.Z * this.m_sourceWorldScale.Z * this.m_profileScaleMultiplier,
+          authoredBounds.Max.Z * this.m_sourceWorldScale.Z * this.m_profileScaleMultiplier
+        );
+        boundsMin.W = authoredBounds.Min.W;
+        boundsMax.X = MaxF(
+          authoredBounds.Min.X * this.m_sourceWorldScale.X * this.m_profileScaleMultiplier,
+          authoredBounds.Max.X * this.m_sourceWorldScale.X * this.m_profileScaleMultiplier
+        );
+        boundsMax.Y = MaxF(
+          authoredBounds.Min.Y * this.m_sourceWorldScale.Y * this.m_profileScaleMultiplier,
+          authoredBounds.Max.Y * this.m_sourceWorldScale.Y * this.m_profileScaleMultiplier
+        );
+        boundsMax.Z = MaxF(
+          authoredBounds.Min.Z * this.m_sourceWorldScale.Z * this.m_profileScaleMultiplier,
+          authoredBounds.Max.Z * this.m_sourceWorldScale.Z * this.m_profileScaleMultiplier
+        );
+        boundsMax.W = authoredBounds.Max.W;
         hasBounds = true;
         staticMeshes = 1;
         ExamineInteractionLog.Diagnostic(s"[ExamineInteraction] World prop local bounds resolved from streamed source: min=\(boundsMin.X),\(boundsMin.Y),\(boundsMin.Z) max=\(boundsMax.X),\(boundsMax.Y),\(boundsMax.Z)");
@@ -2227,18 +2339,24 @@ public class ExamineInteractionPopup extends CustomPopup {
       i = 0;
       while i < ArraySize(components) {
       mesh = null;
+      meshPathText = "";
       meshComponent = components[i] as MeshComponent;
       placedComponent = components[i] as IPlacedComponent;
       skinnedMeshComponent = components[i] as entSkinnedMeshComponent;
 
-      if IsDefined(meshComponent) && meshComponent.IsEnabled() {
+      if this.m_transactionPreview && IsDefined(components[i] as entAppearanceProxyMeshComponent) {
+        ExamineInteractionLog.Diagnostic(s"[ExamineInteraction] Preview bounds contributor excluded: index=\(i) name=\(NameToString(components[i].GetName())) class=\(NameToString(components[i].GetClassName())) reason=appearance proxy");
+      } else if IsDefined(meshComponent) && meshComponent.IsEnabled() {
         mesh = meshComponent.meshResource;
+        meshPath = ResourceAsyncRef.GetPath(meshComponent.mesh);
+        meshPathText = ResRef.ToString(meshPath);
         scale = meshComponent.visualScale;
         if IsDefined(mesh) {
           staticMeshes += 1;
         }
       } else if IsDefined(skinnedMeshComponent) && skinnedMeshComponent.IsEnabled() {
         meshPath = ResourceAsyncRef.GetPath(skinnedMeshComponent.mesh);
+        meshPathText = ResRef.ToString(meshPath);
         if ResRef.IsValid(meshPath) {
           token = GameInstance.GetResourceDepot().LoadResource(meshPath);
           if IsDefined(token) {
@@ -2257,6 +2375,11 @@ public class ExamineInteractionPopup extends CustomPopup {
       }
 
       if IsDefined(mesh) && IsDefined(placedComponent) {
+          if this.m_transactionPreview {
+            localPosition = placedComponent.GetLocalPosition();
+            localOrientation = Quaternion.ToEulerAngles(placedComponent.GetLocalOrientation());
+            ExamineInteractionLog.Diagnostic(s"[ExamineInteraction] Preview bounds contributor: index=\(i) name=\(NameToString(components[i].GetName())) class=\(NameToString(components[i].GetClassName())) mesh=\(meshPathText) scale=\(scale.X),\(scale.Y),\(scale.Z) localPosition=\(localPosition.X),\(localPosition.Y),\(localPosition.Z) localRotation=\(localOrientation.Pitch),\(localOrientation.Yaw),\(localOrientation.Roll) boundsMin=\(mesh.boundingBox.Min.X),\(mesh.boundingBox.Min.Y),\(mesh.boundingBox.Min.Z) boundsMax=\(mesh.boundingBox.Max.X),\(mesh.boundingBox.Max.Y),\(mesh.boundingBox.Max.Z)");
+          }
           ix = 0;
           while ix < 2 {
             iy = 0;
@@ -2345,7 +2468,12 @@ public class ExamineInteractionPopup extends CustomPopup {
     this.m_previewHalfExtents.W = 0.0;
     radius = SqrtF(extentX * extentX + extentY * extentY + extentZ * extentZ) * 0.5;
     this.m_previewRadius = radius;
-    framedDistance = ClampF(radius * 1.8, 0.30, 1.20);
+    if this.m_worldPosterPreview {
+      framedDistance = ClampF(radius * 1.35, 0.30, 1.20);
+      ExamineInteractionLog.Diagnostic(s"[ExamineInteraction] Poster framing resolved from placed-scale bounds: radius=\(radius) distance=\(framedDistance)");
+    } else if framedDistance <= 0.0 {
+      framedDistance = ClampF(radius * 1.8, 0.30, 1.20);
+    }
     this.m_distance = framedDistance;
 
     ExamineInteractionLog.Diagnostic(s"[ExamineInteraction] Preview pivot/framing resolved: x=\(this.m_localPivot.X) y=\(this.m_localPivot.Y) z=\(this.m_localPivot.Z) extents=\(extentX),\(extentY),\(extentZ) radius=\(radius) distance=\(this.m_distance) staticMeshes=\(staticMeshes) skinnedMeshes=\(skinnedMeshes)");

@@ -30,6 +30,7 @@ struct WorldMeshSelection
     RED4ext::CName appearance{};
     RED4ext::Box localBounds{};
     RED4ext::Quaternion orientation{};
+    RED4ext::Vector3 scale{1.0f, 1.0f, 1.0f};
 };
 
 struct WorldMeshNodeCache

@@ -38,6 +38,10 @@ public native func GetWorldNodeOrientation(
   node: wref<worldINodeInstance>
 ) -> Quaternion;
 
+public native func GetWorldNodeScale(
+  node: wref<worldINodeInstance>
+) -> Vector3;
+
 public native func GetWorldNodeAppearance(
   node: wref<worldINodeInstance>
 ) -> CName;

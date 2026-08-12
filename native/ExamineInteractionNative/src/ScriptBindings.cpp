@@ -50,6 +50,11 @@ RED4ext::Quaternion ExamineInteractionNativeGetWorldNodeOrientation(World::NodeH
     return World::GetOrientation(aNode);
 }
 
+RED4ext::Vector3 ExamineInteractionNativeGetWorldNodeScale(World::NodeHandle aNode)
+{
+    return World::GetScale(aNode);
+}
+
 RED4ext::CName ExamineInteractionNativeGetWorldNodeAppearance(World::NodeHandle aNode)
 {
     return World::GetAppearance(aNode);
@@ -112,6 +117,8 @@ RTTI_DEFINE_GLOBALS(ExamineInteractionNative::Bindings, {
         "MisterChedda.ExamineInteraction.Native.GetWorldNodeLocalBounds");
     RTTI_FUNCTION(ExamineInteractionNativeGetWorldNodeOrientation,
         "MisterChedda.ExamineInteraction.Native.GetWorldNodeOrientation");
+    RTTI_FUNCTION(ExamineInteractionNativeGetWorldNodeScale,
+        "MisterChedda.ExamineInteraction.Native.GetWorldNodeScale");
     RTTI_FUNCTION(ExamineInteractionNativeGetWorldNodeAppearance,
         "MisterChedda.ExamineInteraction.Native.GetWorldNodeAppearance");
     RTTI_FUNCTION(ExamineInteractionNativeIsWorldNodeGrouped,

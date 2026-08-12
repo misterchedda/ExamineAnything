@@ -837,6 +837,28 @@ RED4ext::Quaternion GetOrientation(const NodeHandle& aNode)
     return result;
 }
 
+RED4ext::Vector3 GetScale(const NodeHandle& aNode)
+{
+    RED4ext::Vector3 result{1.0f, 1.0f, 1.0f};
+    auto locked = aNode.Lock();
+    if (!locked)
+    {
+        return result;
+    }
+
+    WorldMeshSelection selection{};
+    if (ReadWorldMeshSelection(locked.GetPtr(), selection))
+    {
+        return selection.scale;
+    }
+
+    RED4ext::Transform transform{};
+    uint16_t state{};
+    RED4ext::Handle<RED4ext::CMesh>* meshHandle{};
+    TryReadWorldMeshInstance(locked.GetPtr(), &transform, &result, &state, &meshHandle);
+    return result;
+}
+
 RED4ext::CName GetAppearance(const NodeHandle& aNode)
 {
     auto locked = aNode.Lock();

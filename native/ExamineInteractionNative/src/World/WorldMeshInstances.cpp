@@ -597,6 +597,7 @@ bool TrySelectWorldMeshInstance(RED4ext::worldINodeInstance* aNodeInstance,
     int32_t nearestIndex = -1;
     RED4ext::Box nearestWorldBounds{};
     RED4ext::Quaternion nearestOrientation = rootTransform.orientation;
+    RED4ext::Vector3 nearestScale = rootScale;
     int32_t cookedInstanceCount = 0;
     int32_t authoredInstanceCount = 0;
 
@@ -647,6 +648,7 @@ bool TrySelectWorldMeshInstance(RED4ext::worldINodeInstance* aNodeInstance,
                 nearestIndex = index;
                 nearestWorldBounds = worldBounds;
                 nearestOrientation = worldTransform.orientation;
+                nearestScale = rootScale;
             }
         }
     }
@@ -725,6 +727,8 @@ bool TrySelectWorldMeshInstance(RED4ext::worldINodeInstance* aNodeInstance,
                     nearestIndex = static_cast<int32_t>(index);
                     nearestWorldBounds = worldBounds;
                     nearestOrientation = aWorldTransform.orientation;
+                    nearestScale = {instanceScaleVector.X, instanceScaleVector.Y,
+                                    instanceScaleVector.Z};
                 }
             };
 
@@ -773,6 +777,7 @@ bool TrySelectWorldMeshInstance(RED4ext::worldINodeInstance* aNodeInstance,
                 nearestIndex = index;
                 nearestWorldBounds = worldBounds;
                 nearestOrientation = authored.transform.Orientation;
+                nearestScale = authored.scale;
             }
         }
     }
@@ -837,6 +842,7 @@ bool TrySelectWorldMeshInstance(RED4ext::worldINodeInstance* aNodeInstance,
     aSelection.appearance = aCache ? aCache->appearance : GetWorldMeshAppearance(aNodeInstance);
     aSelection.localBounds = localBounds;
     aSelection.orientation = nearestOrientation;
+    aSelection.scale = nearestScale;
     aDistance = nearestDistance;
     if (kind == WorldMeshSelectionKind::Foliage && aProbeStats)
     {
