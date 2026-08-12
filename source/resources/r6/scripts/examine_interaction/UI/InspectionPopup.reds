@@ -164,7 +164,9 @@ public class ExamineInteractionPopup extends CustomPopup {
     popup.m_worldMeshAppearance = meshAppearance;
     meshPathText = StrLower(ResRef.ToString(meshPath));
     popup.m_worldPosterPreview = StrBeginsWith(meshPathText, "base\\environment\\decoration\\advertising\\posters\\")
-      || StrBeginsWith(meshPathText, "ep1\\environment\\decoration\\advertising\\posters\\");
+      || StrBeginsWith(meshPathText, "ep1\\environment\\decoration\\advertising\\posters\\")
+      || StrFindFirst(meshPathText, "poster") >= 0
+      || StrFindFirst(meshPathText, "photograph") >= 0;
     popup.m_cameraLocalFacingFlip = popup.m_worldPosterPreview;
     profile = ExamineInteractionCompatibility.ResolveMeshProfile(meshPathText);
     popup.ConfigureWorldMeshInformation(meshPath, profile);

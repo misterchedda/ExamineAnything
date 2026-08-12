@@ -60,6 +60,11 @@ RED4ext::CName ExamineInteractionNativeGetWorldNodeAppearance(World::NodeHandle 
     return World::GetAppearance(aNode);
 }
 
+bool ExamineInteractionNativeIsWorldNodeAdvertisement(World::NodeHandle aNode)
+{
+    return World::IsAdvertisement(aNode);
+}
+
 bool ExamineInteractionNativeIsWorldNodeGrouped(World::NodeHandle aNode)
 {
     return World::IsGrouped(aNode);
@@ -121,6 +126,8 @@ RTTI_DEFINE_GLOBALS(ExamineInteractionNative::Bindings, {
         "MisterChedda.ExamineInteraction.Native.GetWorldNodeScale");
     RTTI_FUNCTION(ExamineInteractionNativeGetWorldNodeAppearance,
         "MisterChedda.ExamineInteraction.Native.GetWorldNodeAppearance");
+    RTTI_FUNCTION(ExamineInteractionNativeIsWorldNodeAdvertisement,
+        "MisterChedda.ExamineInteraction.Native.IsWorldNodeAdvertisement");
     RTTI_FUNCTION(ExamineInteractionNativeIsWorldNodeGrouped,
         "MisterChedda.ExamineInteraction.Native.IsWorldNodeGrouped");
     RTTI_FUNCTION(ExamineInteractionNativeGetWorldNodeSelectionIndex,

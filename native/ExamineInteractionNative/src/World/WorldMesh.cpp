@@ -10,6 +10,7 @@
 #include <RED4ext/Scripting/Natives/Generated/ent/Entity.hpp>
 #include <RED4ext/Scripting/Natives/Generated/world/EntityNode.hpp>
 #include <RED4ext/Scripting/Natives/Generated/world/EntityNodeInstance.hpp>
+#include <RED4ext/Scripting/Natives/Generated/world/AdvertisementNode.hpp>
 #include <RED4ext/Scripting/Natives/Generated/world/FoliageCompiledResource.hpp>
 #include <RED4ext/Scripting/Natives/Generated/world/FoliageNode.hpp>
 #include <RED4ext/Scripting/Natives/Generated/world/InstancedDestructibleMeshNode.hpp>
@@ -285,6 +286,17 @@ WorldMeshSelectionKind GetWorldMeshSelectionKind(RED4ext::worldINodeInstance* aN
 bool IsMeshNodeInstance(RED4ext::worldINodeInstance* aNodeInstance)
 {
     return GetWorldMeshSelectionKind(aNodeInstance) != WorldMeshSelectionKind::None;
+}
+
+RED4ext::worldAdvertisementNode* GetAdvertisementDefinition(
+    RED4ext::worldINodeInstance* aNodeInstance)
+{
+    auto* nodeDefinition = GetWorldNodeDefinition(aNodeInstance);
+    auto* rtti = RED4ext::CRTTISystem::Get();
+    auto* advertisementType = rtti ? rtti->GetClass(RED4ext::worldAdvertisementNode::NAME) : nullptr;
+    return nodeDefinition && advertisementType && nodeDefinition->GetType()->IsA(advertisementType)
+        ? static_cast<RED4ext::worldAdvertisementNode*>(nodeDefinition)
+        : nullptr;
 }
 
 bool IsEntityNodeInstance(RED4ext::worldINodeInstance* aNodeInstance)
@@ -887,6 +899,12 @@ bool IsGrouped(const NodeHandle& aNode)
     }
     return kind == WorldMeshSelectionKind::Instanced ||
            kind == WorldMeshSelectionKind::Foliage;
+}
+
+bool IsAdvertisement(const NodeHandle& aNode)
+{
+    auto locked = aNode.Lock();
+    return locked && Detail::GetAdvertisementDefinition(locked.GetPtr());
 }
 
 int32_t GetSelectionIndex(const NodeHandle& aNode)

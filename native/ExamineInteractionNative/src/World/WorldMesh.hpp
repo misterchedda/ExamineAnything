@@ -23,6 +23,7 @@ RED4ext::Box GetLocalBounds(const NodeHandle& aNode);
 RED4ext::Quaternion GetOrientation(const NodeHandle& aNode);
 RED4ext::Vector3 GetScale(const NodeHandle& aNode);
 RED4ext::CName GetAppearance(const NodeHandle& aNode);
+bool IsAdvertisement(const NodeHandle& aNode);
 bool IsGrouped(const NodeHandle& aNode);
 int32_t GetSelectionIndex(const NodeHandle& aNode);
 int32_t GetSelectionCount(const NodeHandle& aNode);

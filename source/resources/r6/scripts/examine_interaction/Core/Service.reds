@@ -874,6 +874,11 @@ public class ExamineInteractionService extends ScriptableService {
         this.ExamineInteractionStopPropFocus("curated prop acquisition failed");
         return;
       }
+      if IsWorldNodeAdvertisement(sourceNode) {
+        FTLog("[ExamineInteraction] Curated world prop acquisition rejected: advertisement nodes are unsupported.");
+        this.ExamineInteractionStopPropFocus("advertisement node rejected");
+        return;
+      }
       meshPath = this.m_examinePropMeshPath;
       meshAppearance = GetWorldNodeAppearance(sourceNode);
       if Equals(meshAppearance, n"") {
@@ -1040,8 +1045,12 @@ public class ExamineInteractionService extends ScriptableService {
         }
   
         if this.ExamineInteractionIsCuratedProp(boundsMeshPath) {
-          meshPath = boundsMeshPath;
-          break;
+          nodeInstance = AcquireWorldMeshCandidate();
+          if IsDefined(nodeInstance) && !IsWorldNodeAdvertisement(nodeInstance) {
+            meshPath = boundsMeshPath;
+            break;
+          }
+          nodeInstance = null;
         }
         ArrayPush(excludedBoundsPaths, boundsMeshPath);
         boundsAttempts += 1;
@@ -1058,7 +1067,7 @@ public class ExamineInteractionService extends ScriptableService {
           if IsDefined(nodeInstance) {
             meshNode = nodeInstance.GetNode() as worldMeshNode;
           }
-          if IsDefined(meshNode) {
+          if IsDefined(meshNode) && !IsWorldNodeAdvertisement(nodeInstance) {
             meshPath = ResourceAsyncRef.GetPath(meshNode.mesh);
           }
         }
@@ -1226,6 +1235,10 @@ public class ExamineInteractionService extends ScriptableService {
       || Equals(path, "base\\open_world\\street_stories\\heywood\\glenn\\sts_hey_gle_03\\entitites\\sts_hey_gle_03_poster_1.ent")
       || Equals(path, "base\\open_world\\street_stories\\heywood\\glenn\\sts_hey_gle_03\\entitites\\sts_hey_gle_03_photo.ent")
       || Equals(path, "base\\open_world\\street_stories\\heywood\\glenn\\sts_hey_gle_03\\entitites\\sts_hey_gle_03_kerry_guitar.entw")
+      || Equals(path, "base\\quest\\main_quests\\part1\\q112\\entities\\q112_hideshi_hino_poster.ent")
+      || Equals(path, "ep1\\openworld\\street_stories\\sts_ep1_03\\entities\\hotel\\sts_ep1_03_photos_clue.ent")
+      || Equals(path, "ep1\\quest\\main_quests\\q304\\entities\\q304_kurt_file_prop.ent")
+      || Equals(path, "base\\quest\\main_quests\\prologue\\q000\\entities\\q000_hym_tooth_a.ent")
       || StrBeginsWith(path, "base\\quest\\minor_quests\\mq000\\entities\\stash_weapons\\");
   }
   
@@ -1244,6 +1257,31 @@ public class ExamineInteractionService extends ScriptableService {
     }
     return StrBeginsWith(path, "ep1\\environment\\decoration\\advertising\\posters\\")
       || StrBeginsWith(path, "base\\environment\\decoration\\advertising\\posters\\")
+      || Equals(path, "base\\environment\\decoration\\unique\\quest\\q000\\q000_lifepath_items\\alarm_clock_neomilitary.mesh")
+      || Equals(path, "base\\environment\\decoration\\unique\\quest\\q114\\book_open\\book_open_q114.mesh")
+      || Equals(path, "base\\environment\\decoration\\unique\\quest\\q110\\chicken\\chicken_newspaper_a_folded_a.mesh")
+      || Equals(path, "base\\environment\\decoration\\unique\\quest\\q110\\chicken\\chicken_newspaper_a_folded_b.mesh")
+      || Equals(path, "base\\environment\\decoration\\unique\\quest\\q005\\q005_corporate_suit_cover\\corporate_suit_cover_a_big.mesh")
+      || Equals(path, "base\\environment\\decoration\\unique\\quest\\q005\\q005_corporate_suit_cover\\corporate_suit_cover_a_small.mesh")
+      || StrBeginsWith(path, "base\\environment\\decoration\\unique\\edgerunners_columbarium_holograms")
+      || Equals(path, "base\\environment\\decoration\\unique\\quest\\quest_photographs\\photograph_horizontal.mesh")
+      || Equals(path, "base\\environment\\decoration\\unique\\quest\\quest_photographs\\photograph_vertical.mesh")
+      || Equals(path, "base\\environment\\decoration\\unique\\quest\\q000\\q000_loa_papers\\q000_loa_papers_a.mesh")
+      || Equals(path, "base\\environment\\decoration\\unique\\quest\\q000\\q000_magazine\\q000_magazine.mesh")
+      || Equals(path, "base\\environment\\decoration\\unique\\quest\\q000\\q000_lifepath_items\\q000_toy_quadra.mesh")
+      || Equals(path, "base\\environment\\decoration\\unique\\quest\\q108\\q108_samurai_poster\\samurai_poster_a.mesh")
+      || Equals(path, "base\\environment\\decoration\\unique\\quest\\q108\\q108_samurai_poster\\samurai_poster_b.mesh")
+      || Equals(path, "base\\environment\\decoration\\unique\\quest\\q108\\q108_samurai_poster\\samurai_poster_c.mesh")
+      || Equals(path, "base\\environment\\decoration\\unique\\quest\\q108\\q108_samurai_poster\\samurai_poster_d.mesh")
+      || Equals(path, "base\\environment\\decoration\\unique\\wilsons_guns_sale\\wilsons_guns_sale_poster.mesh")
+      || Equals(path, "base\\environment\\decoration\\unique\\quest\\sq006_fresh_fruits\\sq006_fresh_fruit_a.mesh")
+      || Equals(path, "base\\environment\\decoration\\unique\\quest\\sq006_fresh_fruits\\sq006_fresh_fruit_b.mesh")
+      || Equals(path, "base\\environment\\decoration\\unique\\quest\\sq006_fresh_fruits\\sq006_fresh_fruit_c.mesh")
+      || Equals(path, "base\\environment\\decoration\\unique\\quest\\sq006_fresh_fruits\\sq006_fresh_fruit_d.mesh")
+      || Equals(path, "base\\environment\\decoration\\unique\\quest\\sq006_fresh_fruits\\sq006_fresh_fruit_e.mesh")
+      || Equals(path, "base\\environment\\decoration\\unique\\quest\\sq006\\sq006_election_posters\\sq006_lucius_rhyne_poster.mesh")
+      || Equals(path, "base\\environment\\decoration\\unique\\quest\\sq006\\tabloid\\sq006_tabloid.mesh")
+      || Equals(path, "base\\environment\\decoration\\unique\\quest\\sq006\\sq006_election_posters\\sq006_weldon_holt_poster.mesh")
       || StrBeginsWith(path, "base\\characters\\garment\\gang_valentino\\item\\i1_090_full__jewlery\\")
       || StrBeginsWith(path, "base\\environment\\decoration\\apparel\\accessories\\lighter\\")
       || StrBeginsWith(path, "base\\environment\\decoration\\apparel\\cosmetics\\")

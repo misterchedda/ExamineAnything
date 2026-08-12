@@ -46,6 +46,10 @@ public native func GetWorldNodeAppearance(
   node: wref<worldINodeInstance>
 ) -> CName;
 
+public native func IsWorldNodeAdvertisement(
+  node: wref<worldINodeInstance>
+) -> Bool;
+
 public native func IsWorldNodeGrouped(
   node: wref<worldINodeInstance>
 ) -> Bool;
