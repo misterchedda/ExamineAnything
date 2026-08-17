@@ -197,8 +197,12 @@ public class ExamineInteractionPopup extends CustomPopup {
     let appearanceName: CName;
     let neutralOrientation: EulerAngles;
     let popup: ref<ExamineInteractionPopup>;
+    let profile: ref<ExamineInteractionEntityProfile>;
+    let profileID: String;
+    let profileOrientation: EulerAngles;
     let staticEntitySystem = GameInstance.GetStaticEntitySystem();
     let templatePath: ResRef;
+    let templatePathText: String;
 
     if !IsDefined(sourceEntity) || !IsDefined(requester) {
       FTLog("[ExamineInteraction] World-entity popup failed: entity or requester is unavailable.");
@@ -225,16 +229,28 @@ public class ExamineInteractionPopup extends CustomPopup {
     popup.m_sourceEntity = sourceEntity;
     popup.m_templatePath = templatePath;
     popup.m_appearanceName = appearanceName;
-    if StrFindFirst(StrLower(ResRef.ToString(templatePath)), "\\stash_weapons\\") >= 0 {
+    templatePathText = StrLower(ResRef.ToString(templatePath));
+    profile = ExamineInteractionCompatibility.ResolveEntityProfile(templatePathText, NameToString(appearanceName));
+    if StrFindFirst(templatePathText, "\\stash_weapons\\") >= 0 {
       popup.m_yawOffset = 90.0;
     }
     popup.m_cameraLocalFacingFlip = IsDefined(sourceEntity as Frame)
-      || StrFindFirst(StrLower(ResRef.ToString(templatePath)), "poster") >= 0;
-    popup.m_sourceOrientation = EulerAngles.ToQuat(neutralOrientation);
+      || StrFindFirst(templatePathText, "poster") >= 0;
+    if IsDefined(profile) {
+      profileID = profile.id;
+      profileOrientation.Pitch = profile.pitch;
+      profileOrientation.Yaw = profile.yaw;
+      profileOrientation.Roll = profile.roll;
+      popup.m_sourceOrientation = EulerAngles.ToQuat(profileOrientation);
+      popup.m_profileScaleMultiplier = profile.scaleMultiplier;
+    } else {
+      popup.m_sourceOrientation = EulerAngles.ToQuat(neutralOrientation);
+    }
     popup.m_distance = 0.42;
     popup.ConfigureWorldMeshInformation(templatePath);
     popup.ConfigureWorldEntityScannerInformation(sourceEntity);
-    ExamineInteractionLog.Diagnostic(s"[ExamineInteraction] Whole world-entity presentation configured: cameraLocalFlip=\(popup.m_cameraLocalFacingFlip) class=\(NameToString(sourceEntity.GetClassName())) template=\(ResRef.ToString(templatePath)) appearance=\(NameToString(appearanceName))");
+    popup.ConfigureWorldEntityProfileInformation(profile);
+    ExamineInteractionLog.Diagnostic(s"[ExamineInteraction] Whole world-entity presentation configured: profile=\(profileID) cameraLocalFlip=\(popup.m_cameraLocalFacingFlip) rotation=\(profileOrientation.Pitch),\(profileOrientation.Yaw),\(profileOrientation.Roll) profileScale=\(popup.m_profileScaleMultiplier) class=\(NameToString(sourceEntity.GetClassName())) template=\(ResRef.ToString(templatePath)) appearance=\(NameToString(appearanceName))");
     popup.Open(requester);
   }
 
@@ -600,6 +616,20 @@ public class ExamineInteractionPopup extends CustomPopup {
     this.m_inspectionType = "";
   }
 
+  private func ConfigureWorldEntityProfileInformation(profile: ref<ExamineInteractionEntityProfile>) -> Void {
+    if !IsDefined(profile) {
+      return;
+    }
+
+    if IsStringValid(profile.name) {
+      this.m_inspectionTitle = profile.name;
+    }
+    if IsStringValid(profile.description) {
+      this.m_inspectionDescription = profile.description;
+    }
+    this.m_hasAuthoredProfileText = IsStringValid(profile.name) || IsStringValid(profile.description);
+  }
+
   private func NormalizeWorldMeshScale() -> Void {
     if AbsF(this.m_sourceWorldScale.X) < 0.001 {
       this.m_sourceWorldScale.X = 1.0;
@@ -643,16 +673,116 @@ public class ExamineInteractionPopup extends CustomPopup {
     return true;
   }
 
+  private func ResolveWorldEntityScannerRecord(recordID: TweakDBID, out name: String, out description: String) -> Bool {
+    let record: ref<ScannableData_Record>;
+
+    if !TDBID.IsValid(recordID) {
+      return false;
+    }
+
+    record = TweakDBInterface.GetScannableDataRecord(recordID);
+    if !IsDefined(record) {
+      return false;
+    }
+
+    name = GetLocalizedText(LocKeyToString(record.LocalizedName()));
+    description = GetLocalizedText(LocKeyToString(record.LocalizedDescription()));
+    return IsStringValid(name) || IsStringValid(description);
+  }
+
+  private func FormatWorldEntityScannerLine(name: String, description: String) -> String {
+    if IsStringValid(name) && IsStringValid(description) {
+      return name + "  " + description;
+    }
+    if IsStringValid(name) {
+      return name;
+    }
+    return description;
+  }
+
+  private func ConfigureWorldEntityScannerClue(clue: FocusClueDefinition, promoteFirstRecordName: Bool) -> Bool {
+    let description: String;
+    let i: Int32;
+    let line: String;
+    let lines: array<String>;
+    let name: String;
+    let promotedTitle: Bool;
+
+    while i < ArraySize(clue.extendedClueRecords) {
+      name = "";
+      description = "";
+      line = "";
+      if this.ResolveWorldEntityScannerRecord(clue.extendedClueRecords[i].clueRecord, name, description) {
+        if promoteFirstRecordName && !promotedTitle && IsStringValid(name) {
+          this.m_inspectionTitle = name;
+          promotedTitle = true;
+          line = description;
+        } else {
+          line = this.FormatWorldEntityScannerLine(name, description);
+        }
+      }
+      if IsStringValid(line) && !ArrayContains(lines, line) {
+        ArrayPush(lines, line);
+      }
+      i += 1;
+    }
+
+    name = "";
+    description = "";
+    line = "";
+    if this.ResolveWorldEntityScannerRecord(clue.clueRecord, name, description) {
+      if promoteFirstRecordName && !promotedTitle && IsStringValid(name) {
+        this.m_inspectionTitle = name;
+        promotedTitle = true;
+        line = description;
+      } else {
+        line = this.FormatWorldEntityScannerLine(name, description);
+      }
+    }
+    if IsStringValid(line) && !ArrayContains(lines, line) {
+      ArrayPush(lines, line);
+    }
+
+    if ArraySize(lines) == 0 && !promotedTitle {
+      return false;
+    }
+
+    i = 0;
+    this.m_inspectionDescription = "";
+    while i < ArraySize(lines) {
+      this.m_inspectionDescription = IsStringValid(this.m_inspectionDescription)
+        ? this.m_inspectionDescription + "\n" + lines[i]
+        : lines[i];
+      i += 1;
+    }
+
+    this.m_hasAuthoredScannerText = true;
+    ExamineInteractionLog.Diagnostic(s"[ExamineInteraction] Scanner clue text resolved: records=\(ArraySize(lines)) title=\(this.m_inspectionTitle) description=\(this.m_inspectionDescription)");
+    return true;
+  }
+
   private func ConfigureWorldEntityScannerInformation(sourceEntity: wref<Entity>) -> Void {
     let clues: array<FocusClueDefinition>;
     let components: array<ref<IComponent>>;
     let customDescriptions: array<TweakDBID>;
+    let displayName: String;
+    let foundScanning: Bool;
     let i: Int32;
+    let j: Int32;
     let objectDescription: ref<ObjectScanningDescription>;
     let scanning: ref<ScanningComponent>;
+    let sourceObject: wref<GameObject>;
 
     if !IsDefined(sourceEntity) {
       return;
+    }
+
+    sourceObject = sourceEntity as GameObject;
+    if IsDefined(sourceObject) {
+      displayName = sourceObject.GetDisplayName();
+      if IsStringValid(displayName) {
+        this.m_inspectionTitle = displayName;
+      }
     }
 
     components = sourceEntity.GetComponents();
@@ -660,48 +790,61 @@ public class ExamineInteractionPopup extends CustomPopup {
     while i < ArraySize(components) {
       scanning = components[i] as ScanningComponent;
       if IsDefined(scanning) {
-        break;
+        foundScanning = true;
+        clues = scanning.GetAllClues();
+        j = 0;
+        while j < ArraySize(clues) {
+          if clues[j].isEnabled && this.ConfigureWorldEntityScannerClue(clues[j], !IsStringValid(displayName)) {
+            return;
+          }
+          j += 1;
+        }
       }
       i += 1;
     }
-    if !IsDefined(scanning) {
+
+    i = 0;
+    while i < ArraySize(components) {
+      scanning = components[i] as ScanningComponent;
+      if IsDefined(scanning) {
+        clues = scanning.GetAllClues();
+        j = 0;
+        while j < ArraySize(clues) {
+          if this.ConfigureWorldEntityScannerClue(clues[j], !IsStringValid(displayName)) {
+            return;
+          }
+          j += 1;
+        }
+      }
+      i += 1;
+    }
+
+    i = 0;
+    while i < ArraySize(components) {
+      scanning = components[i] as ScanningComponent;
+      if IsDefined(scanning) {
+        objectDescription = scanning.GetObjectDescription();
+        if IsDefined(objectDescription) {
+          if this.ApplyWorldEntityScannerRecord(objectDescription.GetGameplayDesription()) {
+            return;
+          }
+
+          customDescriptions = objectDescription.GetCustomDesriptions();
+          j = 0;
+          while j < ArraySize(customDescriptions) {
+            if this.ApplyWorldEntityScannerRecord(customDescriptions[j]) {
+              return;
+            }
+            j += 1;
+          }
+        }
+      }
+      i += 1;
+    }
+
+    if !foundScanning {
       ExamineInteractionLog.Diagnostic("[ExamineInteraction] World entity has no scanning component; retaining generated preview text.");
       return;
-    }
-
-    clues = scanning.GetAllClues();
-    i = 0;
-    while i < ArraySize(clues) {
-      if clues[i].isEnabled && this.ApplyWorldEntityScannerRecord(clues[i].clueRecord) {
-        return;
-      }
-      i += 1;
-    }
-
-    i = 0;
-    while i < ArraySize(clues) {
-      if this.ApplyWorldEntityScannerRecord(clues[i].clueRecord) {
-        return;
-      }
-      i += 1;
-    }
-
-    objectDescription = scanning.GetObjectDescription();
-    if !IsDefined(objectDescription) {
-      ExamineInteractionLog.Diagnostic("[ExamineInteraction] World entity scanning component has no readable clue or object-description record.");
-      return;
-    }
-    if this.ApplyWorldEntityScannerRecord(objectDescription.GetGameplayDesription()) {
-      return;
-    }
-
-    customDescriptions = objectDescription.GetCustomDesriptions();
-    i = 0;
-    while i < ArraySize(customDescriptions) {
-      if this.ApplyWorldEntityScannerRecord(customDescriptions[i]) {
-        return;
-      }
-      i += 1;
     }
     ExamineInteractionLog.Diagnostic("[ExamineInteraction] World entity scanning records did not resolve localized preview text.");
   }
@@ -1114,7 +1257,7 @@ public class ExamineInteractionPopup extends CustomPopup {
   private func IsInspectionTextEnabled() -> Bool {
     let settings = ExamineInteractionSettings.Get(this.GetGame());
 
-    if (this.m_worldEntityPreview && this.m_hasAuthoredScannerText)
+    if (this.m_worldEntityPreview && (this.m_hasAuthoredScannerText || this.m_hasAuthoredProfileText))
       || (this.m_worldMeshPreview && this.m_hasAuthoredProfileText) {
       return true;
     }
@@ -2009,6 +2152,7 @@ public class ExamineInteractionPopup extends CustomPopup {
     this.m_previewReady = true;
     this.UnregisterPreviewAttachCallback();
     this.ApplyPreviewRenderingPlane(preview);
+    this.ApplyWorldEntityProfileScale(preview);
     if !this.m_borrowedWorldWeapon && !this.m_worldMeshPreview {
       this.DisablePreviewCollision(preview);
     }
@@ -2097,6 +2241,46 @@ public class ExamineInteractionPopup extends CustomPopup {
     }
 
     return false;
+  }
+
+  private final func ApplyWorldEntityProfileScale(preview: ref<Entity>) -> Void {
+    let components: array<ref<IComponent>>;
+    let i: Int32;
+    let localPosition: Vector4;
+    let meshComponent: ref<MeshComponent>;
+    let placedComponent: ref<IPlacedComponent>;
+    let scale: Vector3;
+    let updated: Int32;
+
+    if !this.m_worldEntityPreview
+      || !IsDefined(preview)
+      || AbsF(this.m_profileScaleMultiplier - 1.0) < 0.001 {
+      return;
+    }
+
+    components = preview.GetComponents();
+    while i < ArraySize(components) {
+      meshComponent = components[i] as MeshComponent;
+      placedComponent = components[i] as IPlacedComponent;
+      if IsDefined(meshComponent) {
+        scale = meshComponent.visualScale;
+        scale.X *= this.m_profileScaleMultiplier;
+        scale.Y *= this.m_profileScaleMultiplier;
+        scale.Z *= this.m_profileScaleMultiplier;
+        meshComponent.visualScale = scale;
+
+        if IsDefined(placedComponent) {
+          localPosition = placedComponent.GetLocalPosition();
+          localPosition.X *= this.m_profileScaleMultiplier;
+          localPosition.Y *= this.m_profileScaleMultiplier;
+          localPosition.Z *= this.m_profileScaleMultiplier;
+          placedComponent.SetLocalPosition(localPosition);
+        }
+        updated += 1;
+      }
+      i += 1;
+    }
+    ExamineInteractionLog.Diagnostic(s"[ExamineInteraction] Entity profile scale applied: multiplier=\(this.m_profileScaleMultiplier) staticMeshes=\(updated)");
   }
 
   private final func PrepareWorldMeshPreview(preview: ref<Entity>) -> Void {

@@ -10,6 +10,19 @@ public class ExamineInteractionMeshProfile extends IScriptable {
   public let scaleMultiplier: Float;
 }
 
+public class ExamineInteractionEntityProfile extends IScriptable {
+  public let id: String;
+  public let path: String;
+  public let prefix: String;
+  public let appearance: String;
+  public let name: String;
+  public let description: String;
+  public let pitch: Float;
+  public let yaw: Float;
+  public let roll: Float;
+  public let scaleMultiplier: Float;
+}
+
 public abstract class ExamineInteractionCompatibility {
   private static func NormalizePath(path: String) -> String {
     return StrLower(StrReplace(path, "/", "\\"));
@@ -97,6 +110,32 @@ public abstract class ExamineInteractionCompatibility {
     return profile;
   }
 
+  private static func ReadEntityProfilePresentation(profile: ref<ExamineInteractionEntityProfile>) -> ref<ExamineInteractionEntityProfile> {
+    let profileID = profile.id;
+    profile.name = ExamineInteractionCompatibility.ResolveLocalizedProfileText(profileID, "name");
+    profile.description = ExamineInteractionCompatibility.ResolveLocalizedProfileText(profileID, "description");
+    profile.pitch = StringToFloat(TweakDBInterface.GetString(
+      ExamineInteractionCompatibility.ProfileFlat(profileID, "pitch"),
+      "0.0"
+    ));
+    profile.yaw = StringToFloat(TweakDBInterface.GetString(
+      ExamineInteractionCompatibility.ProfileFlat(profileID, "yaw"),
+      "0.0"
+    ));
+    profile.roll = StringToFloat(TweakDBInterface.GetString(
+      ExamineInteractionCompatibility.ProfileFlat(profileID, "roll"),
+      "0.0"
+    ));
+    profile.scaleMultiplier = StringToFloat(TweakDBInterface.GetString(
+      ExamineInteractionCompatibility.ProfileFlat(profileID, "scaleMultiplier"),
+      "1.0"
+    ));
+    if profile.scaleMultiplier <= 0.0 {
+      profile.scaleMultiplier = 1.0;
+    }
+    return profile;
+  }
+
   public static func ResolveMeshProfile(path: String) -> ref<ExamineInteractionMeshProfile> {
     let bestPrefixLength: Int32;
     let candidate: ref<ExamineInteractionMeshProfile>;
@@ -136,6 +175,102 @@ public abstract class ExamineInteractionCompatibility {
       : null;
   }
 
+  public static func ResolveEntityProfile(path: String, appearance: String) -> ref<ExamineInteractionEntityProfile> {
+    let appearancePrefixLength: Int32;
+    let candidate: ref<ExamineInteractionEntityProfile>;
+    let exactGeneral: ref<ExamineInteractionEntityProfile>;
+    let generalPrefixLength: Int32;
+    let i: Int32;
+    let normalizedAppearance = StrLower(appearance);
+    let normalizedPath = ExamineInteractionCompatibility.NormalizePath(path);
+    let prefixAppearance: ref<ExamineInteractionEntityProfile>;
+    let prefixGeneral: ref<ExamineInteractionEntityProfile>;
+    let profileIDs = TDB.GetStringArray(t"MisterChedda.ExamineInteraction.entityProfiles");
+
+    while i < ArraySize(profileIDs) {
+      candidate = new ExamineInteractionEntityProfile();
+      candidate.id = profileIDs[i];
+      candidate.path = ExamineInteractionCompatibility.NormalizePath(
+        TweakDBInterface.GetString(
+          ExamineInteractionCompatibility.ProfileFlat(candidate.id, "path"),
+          ""
+        )
+      );
+      candidate.prefix = ExamineInteractionCompatibility.NormalizePath(
+        TweakDBInterface.GetString(
+          ExamineInteractionCompatibility.ProfileFlat(candidate.id, "prefix"),
+          ""
+        )
+      );
+      candidate.appearance = StrLower(TweakDBInterface.GetString(
+        ExamineInteractionCompatibility.ProfileFlat(candidate.id, "appearance"),
+        ""
+      ));
+
+      if IsStringValid(candidate.path) && Equals(normalizedPath, candidate.path) {
+        if IsStringValid(candidate.appearance) && Equals(normalizedAppearance, candidate.appearance) {
+          return ExamineInteractionCompatibility.ReadEntityProfilePresentation(candidate);
+        }
+        if !IsStringValid(candidate.appearance) && !IsDefined(exactGeneral) {
+          exactGeneral = candidate;
+        }
+      }
+
+      if IsStringValid(candidate.prefix) && StrBeginsWith(normalizedPath, candidate.prefix) {
+        if IsStringValid(candidate.appearance)
+          && Equals(normalizedAppearance, candidate.appearance)
+          && StrLen(candidate.prefix) > appearancePrefixLength {
+          appearancePrefixLength = StrLen(candidate.prefix);
+          prefixAppearance = candidate;
+        } else if !IsStringValid(candidate.appearance)
+          && StrLen(candidate.prefix) > generalPrefixLength {
+          generalPrefixLength = StrLen(candidate.prefix);
+          prefixGeneral = candidate;
+        }
+      }
+      i += 1;
+    }
+
+    if IsDefined(exactGeneral) {
+      return ExamineInteractionCompatibility.ReadEntityProfilePresentation(exactGeneral);
+    }
+    if IsDefined(prefixAppearance) {
+      return ExamineInteractionCompatibility.ReadEntityProfilePresentation(prefixAppearance);
+    }
+    return IsDefined(prefixGeneral)
+      ? ExamineInteractionCompatibility.ReadEntityProfilePresentation(prefixGeneral)
+      : null;
+  }
+
+  private static func HasEntityProfile(path: String) -> Bool {
+    let candidatePath: String;
+    let candidatePrefix: String;
+    let i: Int32;
+    let normalizedPath = ExamineInteractionCompatibility.NormalizePath(path);
+    let profileIDs = TDB.GetStringArray(t"MisterChedda.ExamineInteraction.entityProfiles");
+
+    while i < ArraySize(profileIDs) {
+      candidatePath = ExamineInteractionCompatibility.NormalizePath(
+        TweakDBInterface.GetString(
+          ExamineInteractionCompatibility.ProfileFlat(profileIDs[i], "path"),
+          ""
+        )
+      );
+      candidatePrefix = ExamineInteractionCompatibility.NormalizePath(
+        TweakDBInterface.GetString(
+          ExamineInteractionCompatibility.ProfileFlat(profileIDs[i], "prefix"),
+          ""
+        )
+      );
+      if (IsStringValid(candidatePath) && Equals(normalizedPath, candidatePath))
+        || (IsStringValid(candidatePrefix) && StrBeginsWith(normalizedPath, candidatePrefix)) {
+        return true;
+      }
+      i += 1;
+    }
+    return false;
+  }
+
   public static func IsRegisteredMesh(path: String) -> Bool {
     let normalizedPath = ExamineInteractionCompatibility.NormalizePath(path);
     return IsDefined(ExamineInteractionCompatibility.ResolveMeshProfile(normalizedPath))
@@ -151,7 +286,8 @@ public abstract class ExamineInteractionCompatibility {
 
   public static func IsRegisteredEntity(path: String) -> Bool {
     let normalizedPath = ExamineInteractionCompatibility.NormalizePath(path);
-    return ExamineInteractionCompatibility.MatchesExact(
+    return ExamineInteractionCompatibility.HasEntityProfile(normalizedPath)
+      || ExamineInteractionCompatibility.MatchesExact(
         normalizedPath,
         TDB.GetStringArray(t"MisterChedda.ExamineInteraction.entityPaths")
       )

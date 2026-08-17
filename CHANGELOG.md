@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Added TweakXL entity presentation profiles with optional active-appearance matching, localized text overrides, rotation correction, and preview scaling
+- Added automatic preview text from every valid runtime scanning component on registered entities
+
 ## [0.3.0] - 2026-08-12
 
 ### Added

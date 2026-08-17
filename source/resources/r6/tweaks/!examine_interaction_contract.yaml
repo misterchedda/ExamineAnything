@@ -17,3 +17,7 @@ MisterChedda.ExamineInteraction.entityPrefixes:
 MisterChedda.ExamineInteraction.meshProfiles:
   $type: array:String
   $value: []
+
+MisterChedda.ExamineInteraction.entityProfiles:
+  $type: array:String
+  $value: []
