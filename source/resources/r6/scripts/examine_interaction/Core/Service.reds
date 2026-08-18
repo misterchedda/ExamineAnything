@@ -42,6 +42,9 @@ public class ExamineInteractionService extends ScriptableService {
   private let m_examineWalkSuppressionArmed: Bool;
   private let m_examineWalkSuppressionGeneration: Uint32;
   private let m_examineItemPreviewFactory: ref<ExamineInteractionWeaponPreviewFactory>;
+  private let m_examineAimBlackboard: ref<IBlackboard>;
+  private let m_examineAimCallback: ref<CallbackHandle>;
+  private let m_examinePopupOpenOrOpening: Bool;
 
   private cb func OnLoad() {
     this.ResolveExamineKeys();
@@ -66,6 +69,24 @@ public class ExamineInteractionService extends ScriptableService {
   public final func IsEnabled() -> Bool {
     let settings = this.GetSettings();
     return !IsDefined(settings) || settings.enabled;
+  }
+
+  public final func TryReserveInspectionPopup() -> Bool {
+    if this.m_examinePopupOpenOrOpening {
+      ExamineInteractionLog.Diagnostic("[ExamineInteraction] Ignored duplicate inspection popup request while an inspection is already active.");
+      return false;
+    }
+
+    this.m_examinePopupOpenOrOpening = true;
+    return true;
+  }
+
+  public final func ReleaseInspectionPopup() -> Void {
+    this.m_examinePopupOpenOrOpening = false;
+  }
+
+  public final func IsInspectionPopupOpenOrOpening() -> Bool {
+    return this.m_examinePopupOpenOrOpening;
   }
 
   private final func IsControllerKey(key: EInputKey) -> Bool {
@@ -117,11 +138,6 @@ public class ExamineInteractionService extends ScriptableService {
       || Equals(key, this.m_examineControllerKey);
   }
 
-  private final func IsPropFocusKey(key: EInputKey) -> Bool {
-    return Equals(key, EInputKey.IK_RightMouse)
-      || Equals(key, EInputKey.IK_Pad_LeftTrigger);
-  }
-
   private final func RegisterInputBindings() -> Void {
     let handler = GameInstance.GetCallbackSystem()
       .RegisterCallback(n"Input/Key", this, n"OnExamineInteractionKey");
@@ -131,8 +147,60 @@ public class ExamineInteractionService extends ScriptableService {
     if NotEquals(this.m_examineControllerKey, this.m_examineKeyboardKey) {
       handler.AddTarget(InputTarget.Key(this.m_examineControllerKey, EInputAction.IACT_Release));
     }
-    handler.AddTarget(InputTarget.Key(EInputKey.IK_RightMouse));
-    handler.AddTarget(InputTarget.Key(EInputKey.IK_Pad_LeftTrigger));
+  }
+
+  private final func RegisterAimListener() -> Void {
+    let player = this.GetPlayer();
+
+    this.UnregisterAimListener();
+    if !IsDefined(player) {
+      return;
+    }
+
+    this.m_examineAimBlackboard = player.GetPlayerStateMachineBlackboard();
+    if !IsDefined(this.m_examineAimBlackboard) {
+      return;
+    }
+
+    this.m_examineAimCallback = this.m_examineAimBlackboard.RegisterListenerInt(
+      GetAllBlackboardDefs().PlayerStateMachine.UpperBody,
+      this,
+      n"OnExamineInteractionAimStateChanged"
+    );
+    this.ExamineInteractionUpdateAimState(
+      this.m_examineAimBlackboard.GetInt(GetAllBlackboardDefs().PlayerStateMachine.UpperBody)
+    );
+  }
+
+  private final func UnregisterAimListener() -> Void {
+    if IsDefined(this.m_examineAimBlackboard)
+      && IsDefined(this.m_examineAimCallback) {
+      this.m_examineAimBlackboard.UnregisterListenerInt(
+        GetAllBlackboardDefs().PlayerStateMachine.UpperBody,
+        this.m_examineAimCallback
+      );
+    }
+
+    this.m_examineAimCallback = null;
+    this.m_examineAimBlackboard = null;
+  }
+
+  private cb func OnExamineInteractionAimStateChanged(value: Int32) -> Bool {
+    this.ExamineInteractionUpdateAimState(value);
+  }
+
+  private final func ExamineInteractionUpdateAimState(value: Int32) -> Void {
+    let upperBodyState: gamePSMUpperBodyStates = IntEnum<gamePSMUpperBodyStates>(value);
+    let focusing = Equals(upperBodyState, gamePSMUpperBodyStates.Aim);
+
+    ExamineInteractionLog.Diagnostic(s"[ExamineInteraction] PROP FOCUS STATE: upperBody=\(value) aiming=\(focusing)");
+    if focusing && this.IsEnabled() {
+      if !this.m_examinePropFocusHeld {
+        this.ExamineInteractionStartPropFocus();
+      }
+    } else {
+      this.ExamineInteractionStopPropFocus("focus mode left or mod disabled");
+    }
   }
 
   private final func RefreshInputBindings() -> Void {
@@ -201,6 +269,10 @@ public class ExamineInteractionService extends ScriptableService {
     if !this.IsEnabled() {
       this.ExamineInteractionStopPropFocus("settings disabled");
       this.m_examineInteractionVisible = false;
+    } else if IsDefined(this.m_examineAimBlackboard) {
+      this.ExamineInteractionUpdateAimState(
+        this.m_examineAimBlackboard.GetInt(GetAllBlackboardDefs().PlayerStateMachine.UpperBody)
+      );
     }
 
     if IsDefined(this.GetSettings())
@@ -223,6 +295,7 @@ public class ExamineInteractionService extends ScriptableService {
       // Mod Settings can restore persisted values after the service itself loads, so resolve again at HUD session attach
       if attaching {
         this.RefreshInputBindings();
+        this.RegisterAimListener();
       }
       controller.ExamineInteractionSetWorldPropPrompt(
         this.m_examinePropPromptVisible,
@@ -263,6 +336,7 @@ public class ExamineInteractionService extends ScriptableService {
   }
 
   public final func DetachController() -> Void {
+    this.UnregisterAimListener();
     this.ExamineInteractionStopPropFocus("looting controller detached");
     this.ClearExamineWalkSuppression();
     if IsDefined(this.m_examineItemPreviewFactory) {
@@ -270,6 +344,7 @@ public class ExamineInteractionService extends ScriptableService {
       this.m_examineItemPreviewFactory = null;
     }
     this.m_examineInteractionVisible = false;
+    this.m_examinePopupOpenOrOpening = false;
     this.m_controller = null;
   }
 
@@ -819,19 +894,13 @@ public class ExamineInteractionService extends ScriptableService {
     let sourceNode: wref<worldINodeInstance>;
 
     if !this.IsEnabled() {
-      if this.IsPropFocusKey(evt.GetKey())
-        && Equals(evt.GetAction(), EInputAction.IACT_Release) {
-        this.ExamineInteractionStopPropFocus("focus input released while mod disabled");
-      }
       return;
     }
-  
-    if this.IsPropFocusKey(evt.GetKey()) {
-      if Equals(evt.GetAction(), EInputAction.IACT_Press) {
-        this.ExamineInteractionStartPropFocus();
-      } else if Equals(evt.GetAction(), EInputAction.IACT_Release) {
-        this.ExamineInteractionStopPropFocus("focus input released");
-      }
+
+    if this.m_examinePopupOpenOrOpening
+      && this.IsExamineKey(evt.GetKey())
+      && Equals(evt.GetAction(), EInputAction.IACT_Release) {
+      ExamineInteractionLog.Diagnostic("[ExamineInteraction] Ignored Examine input while the inspection popup is already active.");
       return;
     }
 
@@ -910,7 +979,7 @@ public class ExamineInteractionService extends ScriptableService {
       return;
     }
 
-    ExamineInteractionLog.Diagnostic(s"[ExamineInteraction] PROP FOCUS INPUT: focus press received; lootVisible=\(this.m_examineInteractionVisible) playerDefined=\(IsDefined(player))");
+    ExamineInteractionLog.Diagnostic(s"[ExamineInteraction] PROP FOCUS STATE: focus mode entered; lootVisible=\(this.m_examineInteractionVisible) playerDefined=\(IsDefined(player))");
   
     if this.m_examineInteractionVisible || !IsDefined(player) {
       ExamineInteractionLog.Diagnostic("[ExamineInteraction] PROP FOCUS BLOCKED: loot UI is active or player owner is unavailable.");
@@ -1174,7 +1243,7 @@ public class ExamineInteractionService extends ScriptableService {
       return true;
     }
 
-    // Apartment memorabilia and authored stash displays are deliberately exact or directory-scoped. Broad quest/entity prefixes would make RMB focus noisy and could clone scripted quest actors or devices accidentally
+    // Apartment memorabilia and authored stash displays are deliberately exact or directory-scoped. Broad quest/entity prefixes would make Focus mode noisy and could clone scripted quest actors or devices accidentally
     return Equals(path, "base\\quest\\main_quests\\prologue\\q001\\entities\\q001_waving_cat.ent")
       || Equals(path, "ep1\\quest\\main_quests\\q302\\entities\\q302_chimera_core\\q302_chimera_shell_memorabilia.ent")
       || Equals(path, "base\\quest\\minor_quests\\mq000\\entities\\mq000_gwent_plushie.ent")

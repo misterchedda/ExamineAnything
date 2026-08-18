@@ -81,6 +81,30 @@ public class ExamineInteractionPopup extends CustomPopup {
   private let m_actionContext: ref<ExamineInteractionLootActionContext>;
   private let m_actionPlayer: wref<PlayerPuppet>;
   private let m_actionTriggered: Bool;
+  private let m_popupReservationHeld: Bool;
+
+  private static func TryReservePopup() -> Bool {
+    let service = ExamineInteractionService.Get();
+    return IsDefined(service) && service.TryReserveInspectionPopup();
+  }
+
+  private final func HoldPopupReservation() -> Void {
+    this.m_popupReservationHeld = true;
+  }
+
+  private final func ReleasePopupReservation() -> Void {
+    let service: ref<ExamineInteractionService>;
+
+    if !this.m_popupReservationHeld {
+      return;
+    }
+
+    service = ExamineInteractionService.Get();
+    if IsDefined(service) {
+      service.ReleaseInspectionPopup();
+    }
+    this.m_popupReservationHeld = false;
+  }
 
   public static func Show(itemObject: ref<ItemObject>, itemData: wref<gameItemData>, player: wref<PlayerPuppet>, requester: wref<inkGameController>, actionContext: ref<ExamineInteractionLootActionContext>) -> Void {
     let neutralOrientation: EulerAngles;
@@ -92,12 +116,17 @@ public class ExamineInteractionPopup extends CustomPopup {
       return;
     }
 
+    if !ExamineInteractionPopup.TryReservePopup() {
+      return;
+    }
+
     // Clean up a preview left behind by a script reload or interrupted popup
     if IsDefined(staticEntitySystem) {
       staticEntitySystem.DespawnTagged(n"MisterCheddaExamineInteractionPreview");
     }
 
     popup = new ExamineInteractionPopup();
+    popup.HoldPopupReservation();
     popup.m_sourceItem = itemObject;
     popup.m_sourceEntity = itemObject;
     popup.m_actionContext = actionContext;
@@ -123,11 +152,16 @@ public class ExamineInteractionPopup extends CustomPopup {
       return;
     }
 
+    if !ExamineInteractionPopup.TryReservePopup() {
+      return;
+    }
+
     if IsDefined(staticEntitySystem) {
       staticEntitySystem.DespawnTagged(n"MisterCheddaExamineInteractionPreview");
     }
 
     popup = new ExamineInteractionPopup();
+    popup.HoldPopupReservation();
     popup.ConfigureItemInformation(itemID, itemData, player, actionContext, itemQuantity);
     if Equals(popup.m_inspectionTextCategory, ExamineInspectionTextCategory.Clothing) {
       popup.m_yawOffset = 180.0;
@@ -154,11 +188,16 @@ public class ExamineInteractionPopup extends CustomPopup {
       return;
     }
 
+    if !ExamineInteractionPopup.TryReservePopup() {
+      return;
+    }
+
     if IsDefined(staticEntitySystem) {
       staticEntitySystem.DespawnTagged(n"MisterCheddaExamineInteractionPreview");
     }
 
     popup = new ExamineInteractionPopup();
+    popup.HoldPopupReservation();
     popup.m_worldMeshPreview = true;
     popup.m_worldMeshPath = meshPath;
     popup.m_worldMeshAppearance = meshAppearance;
@@ -215,6 +254,10 @@ public class ExamineInteractionPopup extends CustomPopup {
       return;
     }
 
+    if !ExamineInteractionPopup.TryReservePopup() {
+      return;
+    }
+
     if IsDefined(staticEntitySystem) {
       staticEntitySystem.DespawnTagged(n"MisterCheddaExamineInteractionPreview");
     }
@@ -225,6 +268,7 @@ public class ExamineInteractionPopup extends CustomPopup {
     }
 
     popup = new ExamineInteractionPopup();
+    popup.HoldPopupReservation();
     popup.m_worldEntityPreview = true;
     popup.m_sourceEntity = sourceEntity;
     popup.m_templatePath = templatePath;
@@ -267,11 +311,16 @@ public class ExamineInteractionPopup extends CustomPopup {
       return;
     }
 
+    if !ExamineInteractionPopup.TryReservePopup() {
+      return;
+    }
+
     if IsDefined(staticEntitySystem) {
       staticEntitySystem.DespawnTagged(n"MisterCheddaExamineInteractionPreview");
     }
 
     popup = new ExamineInteractionPopup();
+    popup.HoldPopupReservation();
     popup.m_transactionPreview = true;
     popup.m_transactionPreviewEntity = previewItem;
     popup.m_transactionPreviewOwner = owner;
@@ -301,7 +350,12 @@ public class ExamineInteractionPopup extends CustomPopup {
       return;
     }
 
+    if !ExamineInteractionPopup.TryReservePopup() {
+      return;
+    }
+
     popup = new ExamineInteractionPopup();
+    popup.HoldPopupReservation();
     popup.m_transactionPreview = true;
     popup.m_borrowedWorldWeapon = true;
     popup.m_transactionPreviewEntity = previewItem;
@@ -1494,6 +1548,7 @@ public class ExamineInteractionPopup extends CustomPopup {
     this.RestoreSourceVisuals();
     this.RestoreSourceWorldNode();
     this.DespawnPreview();
+    this.ReleasePopupReservation();
     super.OnDetach();
   }
 
