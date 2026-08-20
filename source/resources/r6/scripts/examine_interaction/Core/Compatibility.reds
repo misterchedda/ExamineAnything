@@ -8,6 +8,18 @@ public class ExamineInteractionMeshProfile extends IScriptable {
   public let yaw: Float;
   public let roll: Float;
   public let scaleMultiplier: Float;
+  public let zoomMin: Float;
+  public let zoomMax: Float;
+  public let pitchMin: Float;
+  public let pitchMax: Float;
+  public let yawMin: Float;
+  public let yawMax: Float;
+  public let hasZoomMin: Bool;
+  public let hasZoomMax: Bool;
+  public let hasPitchMin: Bool;
+  public let hasPitchMax: Bool;
+  public let hasYawMin: Bool;
+  public let hasYawMax: Bool;
 }
 
 public class ExamineInteractionEntityProfile extends IScriptable {
@@ -21,6 +33,18 @@ public class ExamineInteractionEntityProfile extends IScriptable {
   public let yaw: Float;
   public let roll: Float;
   public let scaleMultiplier: Float;
+  public let zoomMin: Float;
+  public let zoomMax: Float;
+  public let pitchMin: Float;
+  public let pitchMax: Float;
+  public let yawMin: Float;
+  public let yawMax: Float;
+  public let hasZoomMin: Bool;
+  public let hasZoomMax: Bool;
+  public let hasPitchMin: Bool;
+  public let hasPitchMax: Bool;
+  public let hasYawMin: Bool;
+  public let hasYawMax: Bool;
 }
 
 public abstract class ExamineInteractionCompatibility {
@@ -84,6 +108,20 @@ public abstract class ExamineInteractionCompatibility {
     return literal;
   }
 
+  private static func ReadOptionalProfileFloat(profileID: String, field: String, out value: Float) -> Bool {
+    let raw = TweakDBInterface.GetString(
+      ExamineInteractionCompatibility.ProfileFlat(profileID, field),
+      ""
+    );
+
+    if !IsStringValid(raw) {
+      value = 0.0;
+      return false;
+    }
+    value = StringToFloat(raw);
+    return true;
+  }
+
   private static func ReadMeshProfilePresentation(profile: ref<ExamineInteractionMeshProfile>) -> ref<ExamineInteractionMeshProfile> {
     let profileID = profile.id;
     profile.name = ExamineInteractionCompatibility.ResolveLocalizedProfileText(profileID, "name");
@@ -106,6 +144,18 @@ public abstract class ExamineInteractionCompatibility {
     ));
     if profile.scaleMultiplier <= 0.0 {
       profile.scaleMultiplier = 1.0;
+    }
+    profile.hasZoomMin = ExamineInteractionCompatibility.ReadOptionalProfileFloat(profileID, "zoomMin", profile.zoomMin);
+    profile.hasZoomMax = ExamineInteractionCompatibility.ReadOptionalProfileFloat(profileID, "zoomMax", profile.zoomMax);
+    profile.hasPitchMin = ExamineInteractionCompatibility.ReadOptionalProfileFloat(profileID, "pitchMin", profile.pitchMin);
+    profile.hasPitchMax = ExamineInteractionCompatibility.ReadOptionalProfileFloat(profileID, "pitchMax", profile.pitchMax);
+    profile.hasYawMin = ExamineInteractionCompatibility.ReadOptionalProfileFloat(profileID, "yawMin", profile.yawMin);
+    profile.hasYawMax = ExamineInteractionCompatibility.ReadOptionalProfileFloat(profileID, "yawMax", profile.yawMax);
+    if profile.hasZoomMin && profile.zoomMin <= 0.0 {
+      profile.hasZoomMin = false;
+    }
+    if profile.hasZoomMax && profile.zoomMax <= 0.0 {
+      profile.hasZoomMax = false;
     }
     return profile;
   }
@@ -132,6 +182,18 @@ public abstract class ExamineInteractionCompatibility {
     ));
     if profile.scaleMultiplier <= 0.0 {
       profile.scaleMultiplier = 1.0;
+    }
+    profile.hasZoomMin = ExamineInteractionCompatibility.ReadOptionalProfileFloat(profileID, "zoomMin", profile.zoomMin);
+    profile.hasZoomMax = ExamineInteractionCompatibility.ReadOptionalProfileFloat(profileID, "zoomMax", profile.zoomMax);
+    profile.hasPitchMin = ExamineInteractionCompatibility.ReadOptionalProfileFloat(profileID, "pitchMin", profile.pitchMin);
+    profile.hasPitchMax = ExamineInteractionCompatibility.ReadOptionalProfileFloat(profileID, "pitchMax", profile.pitchMax);
+    profile.hasYawMin = ExamineInteractionCompatibility.ReadOptionalProfileFloat(profileID, "yawMin", profile.yawMin);
+    profile.hasYawMax = ExamineInteractionCompatibility.ReadOptionalProfileFloat(profileID, "yawMax", profile.yawMax);
+    if profile.hasZoomMin && profile.zoomMin <= 0.0 {
+      profile.hasZoomMin = false;
+    }
+    if profile.hasZoomMax && profile.zoomMax <= 0.0 {
+      profile.hasZoomMax = false;
     }
     return profile;
   }

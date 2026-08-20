@@ -35,8 +35,22 @@ public class ExamineInteractionPopup extends CustomPopup {
   private let m_framedDistance: Float;
   private let m_environmentHitDistance: Float;
   private let m_previewBoundsPrepared: Bool;
+  private let m_basePitchOffset: Float;
+  private let m_baseYawOffset: Float;
   private let m_pitchOffset: Float;
   private let m_yawOffset: Float;
+  private let m_profileZoomMin: Float;
+  private let m_profileZoomMax: Float;
+  private let m_profilePitchMin: Float;
+  private let m_profilePitchMax: Float;
+  private let m_profileYawMin: Float;
+  private let m_profileYawMax: Float;
+  private let m_hasProfileZoomMin: Bool;
+  private let m_hasProfileZoomMax: Bool;
+  private let m_hasProfilePitchMin: Bool;
+  private let m_hasProfilePitchMax: Bool;
+  private let m_hasProfileYawMin: Bool;
+  private let m_hasProfileYawMax: Bool;
   private let m_dragging: Bool;
   private let m_keyInputHandler: ref<CallbackSystemHandler>;
   private let m_axisInputHandler: ref<CallbackSystemHandler>;
@@ -133,7 +147,7 @@ public class ExamineInteractionPopup extends CustomPopup {
     popup.m_actionPlayer = player;
     popup.ConfigureItemInformation(itemObject.GetItemID(), itemData, player, actionContext);
     if Equals(popup.m_inspectionTextCategory, ExamineInspectionTextCategory.Clothing) {
-      popup.m_yawOffset = 180.0;
+      popup.m_baseYawOffset = 180.0;
     }
     popup.m_templatePath = itemObject.GetTemplatePath();
     popup.m_appearanceName = itemObject.GetCurrentAppearanceName();
@@ -164,7 +178,7 @@ public class ExamineInteractionPopup extends CustomPopup {
     popup.HoldPopupReservation();
     popup.ConfigureItemInformation(itemID, itemData, player, actionContext, itemQuantity);
     if Equals(popup.m_inspectionTextCategory, ExamineInspectionTextCategory.Clothing) {
-      popup.m_yawOffset = 180.0;
+      popup.m_baseYawOffset = 180.0;
     }
     popup.m_actionContext = actionContext;
     popup.m_actionPlayer = player;
@@ -224,6 +238,20 @@ public class ExamineInteractionPopup extends CustomPopup {
       profileOrientation.Roll = profile.roll;
       popup.m_sourceOrientation = EulerAngles.ToQuat(profileOrientation);
       popup.m_profileScaleMultiplier = profile.scaleMultiplier;
+      popup.ConfigureProfileControls(
+        profile.zoomMin,
+        profile.zoomMax,
+        profile.pitchMin,
+        profile.pitchMax,
+        profile.yawMin,
+        profile.yawMax,
+        profile.hasZoomMin,
+        profile.hasZoomMax,
+        profile.hasPitchMin,
+        profile.hasPitchMax,
+        profile.hasYawMin,
+        profile.hasYawMax
+      );
     } else {
       popup.m_sourceOrientation = EulerAngles.ToQuat(profileOrientation);
     }
@@ -276,7 +304,7 @@ public class ExamineInteractionPopup extends CustomPopup {
     templatePathText = StrLower(ResRef.ToString(templatePath));
     profile = ExamineInteractionCompatibility.ResolveEntityProfile(templatePathText, NameToString(appearanceName));
     if StrFindFirst(templatePathText, "\\stash_weapons\\") >= 0 {
-      popup.m_yawOffset = 90.0;
+      popup.m_baseYawOffset = 90.0;
     }
     popup.m_cameraLocalFacingFlip = IsDefined(sourceEntity as Frame)
       || StrFindFirst(templatePathText, "poster") >= 0;
@@ -287,6 +315,20 @@ public class ExamineInteractionPopup extends CustomPopup {
       profileOrientation.Roll = profile.roll;
       popup.m_sourceOrientation = EulerAngles.ToQuat(profileOrientation);
       popup.m_profileScaleMultiplier = profile.scaleMultiplier;
+      popup.ConfigureProfileControls(
+        profile.zoomMin,
+        profile.zoomMax,
+        profile.pitchMin,
+        profile.pitchMax,
+        profile.yawMin,
+        profile.yawMax,
+        profile.hasZoomMin,
+        profile.hasZoomMax,
+        profile.hasPitchMin,
+        profile.hasPitchMax,
+        profile.hasYawMin,
+        profile.hasYawMax
+      );
     } else {
       popup.m_sourceOrientation = EulerAngles.ToQuat(neutralOrientation);
     }
@@ -333,7 +375,7 @@ public class ExamineInteractionPopup extends CustomPopup {
     popup.m_actionContext = actionContext;
     popup.m_actionPlayer = player;
     popup.m_sourceOrientation = EulerAngles.ToQuat(neutralOrientation);
-    popup.m_yawOffset = weaponPresentation ? 90.0 : 0.0;
+    popup.m_baseYawOffset = weaponPresentation ? 90.0 : 0.0;
     popup.m_distance = 0.42;
     popup.Open(requester);
   }
@@ -366,7 +408,7 @@ public class ExamineInteractionPopup extends CustomPopup {
     popup.m_actionPlayer = player;
     popup.m_borrowedWorldTransform = owner.GetWorldTransform();
     popup.m_sourceOrientation = EulerAngles.ToQuat(neutralOrientation);
-    popup.m_yawOffset = 90.0;
+    popup.m_baseYawOffset = 90.0;
     popup.m_distance = 0.42;
     popup.SuppressBorrowedWorldWeaponHighlight();
     popup.Open(requester);
@@ -378,6 +420,35 @@ public class ExamineInteractionPopup extends CustomPopup {
 
   public func UseCursor() -> Bool {
     return false;
+  }
+
+  private final func ConfigureProfileControls(
+    zoomMin: Float,
+    zoomMax: Float,
+    pitchMin: Float,
+    pitchMax: Float,
+    yawMin: Float,
+    yawMax: Float,
+    hasZoomMin: Bool,
+    hasZoomMax: Bool,
+    hasPitchMin: Bool,
+    hasPitchMax: Bool,
+    hasYawMin: Bool,
+    hasYawMax: Bool
+  ) -> Void {
+    this.m_hasProfileZoomMin = hasZoomMin;
+    this.m_hasProfileZoomMax = hasZoomMax;
+    this.m_hasProfilePitchMin = hasPitchMin;
+    this.m_hasProfilePitchMax = hasPitchMax;
+    this.m_hasProfileYawMin = hasYawMin;
+    this.m_hasProfileYawMax = hasYawMax;
+    this.m_profileZoomMin = MinF(zoomMin, 1.0);
+    this.m_profileZoomMax = MaxF(zoomMax, 1.0);
+    this.m_profilePitchMin = MinF(pitchMin, 0.0);
+    this.m_profilePitchMax = MaxF(pitchMax, 0.0);
+    this.m_profileYawMin = MinF(yawMin, 0.0);
+    this.m_profileYawMax = MaxF(yawMax, 0.0);
+    ExamineInteractionLog.Diagnostic(s"[ExamineInteraction] Profile controls configured: zoom=\(this.m_hasProfileZoomMin):\(this.m_profileZoomMin)..\(this.m_hasProfileZoomMax):\(this.m_profileZoomMax) pitch=\(this.m_hasProfilePitchMin):\(this.m_profilePitchMin)..\(this.m_hasProfilePitchMax):\(this.m_profilePitchMax) yaw=\(this.m_hasProfileYawMin):\(this.m_profileYawMin)..\(this.m_hasProfileYawMax):\(this.m_profileYawMax)");
   }
 
   private func ConfigureItemInformation(itemID: ItemID, itemData: wref<gameItemData>, player: wref<PlayerPuppet>, actionContext: ref<ExamineInteractionLootActionContext>, opt itemQuantity: Int32) -> Void {
@@ -1781,8 +1852,23 @@ public class ExamineInteractionPopup extends CustomPopup {
   }
 
   private final func AccumulatePreviewRotation(pitchDelta: Float, yawDelta: Float) -> Void {
-    this.m_pitchOffset += pitchDelta;
-    this.m_yawOffset += yawDelta;
+    let nextPitch = this.m_pitchOffset + pitchDelta;
+    let nextYaw = this.m_yawOffset + yawDelta;
+
+    if this.m_hasProfilePitchMin {
+      nextPitch = MaxF(nextPitch, this.m_profilePitchMin);
+    }
+    if this.m_hasProfilePitchMax {
+      nextPitch = MinF(nextPitch, this.m_profilePitchMax);
+    }
+    if this.m_hasProfileYawMin {
+      nextYaw = MaxF(nextYaw, this.m_profileYawMin);
+    }
+    if this.m_hasProfileYawMax {
+      nextYaw = MinF(nextYaw, this.m_profileYawMax);
+    }
+    this.m_pitchOffset = nextPitch;
+    this.m_yawOffset = nextYaw;
   }
 
   private cb func OnExamineAxisInput(evt: ref<AxisInputEvent>) -> Void {
@@ -1889,12 +1975,20 @@ public class ExamineInteractionPopup extends CustomPopup {
   }
 
   private final func ChangePreviewDistance(delta: Float) -> Void {
+    let minDistance = 0.20;
     let maxDistance = MaxF(1.50, this.m_framedDistance * 1.75);
 
+    if this.m_hasProfileZoomMax {
+      minDistance = MaxF(minDistance, this.m_framedDistance / this.m_profileZoomMax);
+    }
+    if this.m_hasProfileZoomMin {
+      maxDistance = MinF(maxDistance, this.m_framedDistance / this.m_profileZoomMin);
+    }
     if this.m_environmentHitDistance > 0.0 {
       maxDistance = MinF(maxDistance, this.GetEnvironmentMaxPreviewDistance());
     }
-    this.m_distance = ClampF(this.m_distance + delta, 0.20, maxDistance);
+    minDistance = MinF(minDistance, maxDistance);
+    this.m_distance = ClampF(this.m_distance + delta, minDistance, maxDistance);
     this.ApplyPreviewTransform();
     this.ApplyPreviewDOF();
   }
@@ -1944,8 +2038,8 @@ public class ExamineInteractionPopup extends CustomPopup {
     let transformedY: Vector4;
     let transformedZ: Vector4;
 
-    manualOrientation.Pitch = this.m_pitchOffset;
-    manualOrientation.Yaw = this.m_yawOffset;
+    manualOrientation.Pitch = this.m_basePitchOffset + this.m_pitchOffset;
+    manualOrientation.Yaw = this.m_baseYawOffset + this.m_yawOffset;
     relativeOrientation = EulerAngles.ToQuat(manualOrientation) * this.m_sourceOrientation;
 
     axis.X = this.m_previewHalfExtents.X;
@@ -1971,8 +2065,8 @@ public class ExamineInteractionPopup extends CustomPopup {
     let transformedY: Vector4;
     let transformedZ: Vector4;
 
-    manualOrientation.Pitch = this.m_pitchOffset;
-    manualOrientation.Yaw = this.m_yawOffset;
+    manualOrientation.Pitch = this.m_basePitchOffset + this.m_pitchOffset;
+    manualOrientation.Yaw = this.m_baseYawOffset + this.m_yawOffset;
     relativeOrientation = EulerAngles.ToQuat(manualOrientation) * this.m_sourceOrientation;
 
     axis.X = this.m_previewHalfExtents.X;
@@ -2179,8 +2273,8 @@ public class ExamineInteractionPopup extends CustomPopup {
     previewPosition = Transform.GetPosition(cameraTransform)
       + Transform.GetForward(cameraTransform) * this.m_distance
       + Transform.GetUp(cameraTransform) * 0.02;
-    manualOrientation.Pitch = this.m_pitchOffset;
-    manualOrientation.Yaw = this.m_yawOffset;
+    manualOrientation.Pitch = this.m_basePitchOffset + this.m_pitchOffset;
+    manualOrientation.Yaw = this.m_baseYawOffset + this.m_yawOffset;
     orientation = this.m_cameraOrientation
       * EulerAngles.ToQuat(manualOrientation)
       * this.m_sourceOrientation;
