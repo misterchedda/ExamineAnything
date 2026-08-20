@@ -6,10 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-20
+
 ### Added
 
-- Added TweakXL entity presentation profiles with optional active-appearance matching, localized text overrides, rotation correction, and preview scaling
-- Added automatic preview text from every valid runtime scanning component on registered entities
+- Added TweakXL entity presentation profiles with optional active appearance matching, localized name and description overrides, rotation correction, and preview scaling
+- Added optional `zoomMin`, `zoomMax`, `pitchMin`, `pitchMax`, `yawMin`, and `yawMax` controls to mesh and entity profiles
+- Added automatic preview text from every valid runtime scanning component and clue record on registered entities
+- Added independent mouse and controller preview rotation sensitivity sliders to Mod Settings
+
+### Changed
+
+- World prop focus now follows the native aim state, supporting remapped aim inputs and toggle aim. So if you rebind RMB/LT for aim via the game's native keybinding settings, the Examine interaction for world props will follow the new binding instead of being stuck at RMB/LT
+
+### Fixed
+
+- Prevented repeated Examine input while a preview is opening or active from spawning overlapping popups which was causing a crash for some users
 
 ## [0.3.0] - 2026-08-12
 
