@@ -51,6 +51,8 @@ public class ExamineInteractionPopup extends CustomPopup {
   private let m_hasProfilePitchMax: Bool;
   private let m_hasProfileYawMin: Bool;
   private let m_hasProfileYawMax: Bool;
+  private let m_mouseRotationSensitivity: Float = 1.0;
+  private let m_controllerRotationSensitivity: Float = 1.0;
   private let m_dragging: Bool;
   private let m_keyInputHandler: ref<CallbackSystemHandler>;
   private let m_axisInputHandler: ref<CallbackSystemHandler>;
@@ -1567,6 +1569,13 @@ public class ExamineInteractionPopup extends CustomPopup {
 
   protected cb func OnAttach() {
     let inputBlackboard = GameInstance.GetBlackboardSystem(this.GetGame()).Get(GetAllBlackboardDefs().InputSchemes);
+    let settings = ExamineInteractionSettings.Get(this.GetGame());
+
+    if IsDefined(settings) {
+      this.m_mouseRotationSensitivity = ClampF(settings.mouseRotationSensitivity, 0.25, 3.0);
+      this.m_controllerRotationSensitivity = ClampF(settings.controllerRotationSensitivity, 0.25, 3.0);
+    }
+    ExamineInteractionLog.Diagnostic(s"[ExamineInteraction] Preview rotation sensitivity applied: mouse=\(this.m_mouseRotationSensitivity) controller=\(this.m_controllerRotationSensitivity)");
 
     if IsDefined(inputBlackboard) {
       this.m_inputDeviceCallback = inputBlackboard.RegisterListenerUint(GetAllBlackboardDefs().InputSchemes.Device, this, n"OnExamineInputDeviceChanged");
@@ -1881,9 +1890,9 @@ public class ExamineInteractionPopup extends CustomPopup {
         return;
       }
       if Equals(key, EInputKey.IK_MouseX) {
-        this.AccumulatePreviewRotation(0.0, -value * 0.15);
+        this.AccumulatePreviewRotation(0.0, -value * 0.15 * this.m_mouseRotationSensitivity);
       } else {
-        this.AccumulatePreviewRotation(-value * 0.15, 0.0);
+        this.AccumulatePreviewRotation(-value * 0.15 * this.m_mouseRotationSensitivity, 0.0);
       }
       this.ApplyPreviewTransform();
       this.ApplyDynamicPreviewFOV();
@@ -1896,9 +1905,9 @@ public class ExamineInteractionPopup extends CustomPopup {
         return;
       }
       if Equals(key, EInputKey.IK_Pad_RightAxisX) {
-        this.AccumulatePreviewRotation(0.0, -value * 1.50);
+        this.AccumulatePreviewRotation(0.0, -value * 1.50 * this.m_controllerRotationSensitivity);
       } else {
-        this.AccumulatePreviewRotation(-value * 1.50, 0.0);
+        this.AccumulatePreviewRotation(-value * 1.50 * this.m_controllerRotationSensitivity, 0.0);
       }
       this.ApplyPreviewTransform();
       this.ApplyDynamicPreviewFOV();

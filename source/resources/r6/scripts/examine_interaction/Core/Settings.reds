@@ -101,6 +101,28 @@ public class ExamineInteractionSettings extends ScriptableSystem {
   @runtimeProperty("ModSettings.dependency", "enabled")
   public let examineControllerKey: EInputKey = EInputKey.IK_Pad_LeftThumb;
 
+  @runtimeProperty("ModSettings.mod", "UI_MisterChedda_Examine_ModName")
+  @runtimeProperty("ModSettings.category", "UI_MisterChedda_Examine_Category_Controls")
+  @runtimeProperty("ModSettings.category.order", "4")
+  @runtimeProperty("ModSettings.displayName", "UI_MisterChedda_Examine_MouseRotationSensitivity_Name")
+  @runtimeProperty("ModSettings.description", "UI_MisterChedda_Examine_MouseRotationSensitivity_Description")
+  @runtimeProperty("ModSettings.dependency", "enabled")
+  @runtimeProperty("ModSettings.step", "0.05")
+  @runtimeProperty("ModSettings.min", "0.25")
+  @runtimeProperty("ModSettings.max", "3.0")
+  public let mouseRotationSensitivity: Float = 1.0;
+
+  @runtimeProperty("ModSettings.mod", "UI_MisterChedda_Examine_ModName")
+  @runtimeProperty("ModSettings.category", "UI_MisterChedda_Examine_Category_Controls")
+  @runtimeProperty("ModSettings.category.order", "4")
+  @runtimeProperty("ModSettings.displayName", "UI_MisterChedda_Examine_ControllerRotationSensitivity_Name")
+  @runtimeProperty("ModSettings.description", "UI_MisterChedda_Examine_ControllerRotationSensitivity_Description")
+  @runtimeProperty("ModSettings.dependency", "enabled")
+  @runtimeProperty("ModSettings.step", "0.05")
+  @runtimeProperty("ModSettings.min", "0.25")
+  @runtimeProperty("ModSettings.max", "3.0")
+  public let controllerRotationSensitivity: Float = 1.0;
+
   public static func Get(game: GameInstance) -> ref<ExamineInteractionSettings> {
     return GameInstance.GetScriptableSystemsContainer(game)
       .Get(n"MisterChedda.ExamineInteraction.ExamineInteractionSettings") as ExamineInteractionSettings;
