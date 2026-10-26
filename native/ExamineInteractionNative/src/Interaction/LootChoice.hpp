@@ -14,6 +14,9 @@ bool PrepareLootChoiceEvent(
     RED4ext::ItemID aItemID, RED4ext::CName aAction,
     bool aRemoveItem, bool aIllegal);
 
+void CancelLootChoiceEvent(
+    const RED4ext::Handle<RED4ext::game::interactions::ChoiceEvent>& aEvent);
+
 bool PublishLootChoiceEvent(
     const RED4ext::Handle<RED4ext::game::interactions::ChoiceEvent>& aEvent,
     int32_t aChoiceIndex);

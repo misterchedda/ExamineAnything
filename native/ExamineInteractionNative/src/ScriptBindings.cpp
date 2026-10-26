@@ -1,4 +1,5 @@
 #include "Dof/DofOverride.hpp"
+#include "Engine/Logging.hpp"
 #include "Interaction/LootChoice.hpp"
 #include "World/WorldMesh.hpp"
 
@@ -6,6 +7,11 @@
 
 namespace ExamineInteractionNative::Bindings
 {
+void ExamineInteractionNativeSetDiagnosticLogging(bool aEnabled)
+{
+    Logging::SetDiagnosticLogging(aEnabled);
+}
+
 bool ExamineInteractionNativeSetDof(float aIntensity, float aNearBlur, float aNearFocus,
                                     float aFarBlur, float aFarFocus,
                                     bool aUseNearPlane, bool aUseFarPlane)
@@ -26,6 +32,12 @@ bool ExamineInteractionNativePrepareLootChoiceEvent(
 {
     return Interaction::PrepareLootChoiceEvent(
         aEvent, aItemID, aAction, aRemoveItem, aIllegal);
+}
+
+void ExamineInteractionNativeCancelLootChoiceEvent(
+    const RED4ext::Handle<RED4ext::game::interactions::ChoiceEvent>& aEvent)
+{
+    Interaction::CancelLootChoiceEvent(aEvent);
 }
 
 bool ExamineInteractionNativePublishLootChoiceEvent(
@@ -108,12 +120,16 @@ World::NodeHandle ExamineInteractionNativeAcquireWorldMeshCandidate()
 }
 
 RTTI_DEFINE_GLOBALS(ExamineInteractionNative::Bindings, {
+    RTTI_FUNCTION(ExamineInteractionNativeSetDiagnosticLogging,
+        "MisterChedda.ExamineInteraction.Native.SetDiagnosticLogging");
     RTTI_FUNCTION(ExamineInteractionNativeSetDof,
         "MisterChedda.ExamineInteraction.Native.SetDof");
     RTTI_FUNCTION(ExamineInteractionNativeResetDof,
         "MisterChedda.ExamineInteraction.Native.ResetDof");
     RTTI_FUNCTION(ExamineInteractionNativePrepareLootChoiceEvent,
         "MisterChedda.ExamineInteraction.Native.PrepareLootChoiceEvent");
+    RTTI_FUNCTION(ExamineInteractionNativeCancelLootChoiceEvent,
+        "MisterChedda.ExamineInteraction.Native.CancelLootChoiceEvent");
     RTTI_FUNCTION(ExamineInteractionNativePublishLootChoiceEvent,
         "MisterChedda.ExamineInteraction.Native.PublishLootChoiceEvent");
     RTTI_FUNCTION(ExamineInteractionNativeSetWorldNodeVisible,

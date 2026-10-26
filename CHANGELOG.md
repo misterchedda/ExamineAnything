@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-26
+
+### Added
+
+- Added Cyberpunk 2077 2.5 support, including targeting and previews for the new cooked world mesh nodes while retaining support for instanced meshes, destructible props, foliage, and world entities
+
+### Changed
+
+- Native world-targeting, depth-of-field, and loot diagnostics now follow the existing Diagnostic Logging setting, which defaults to off
+
+### Fixed
+
+- Blocked Examine shortcuts in pause and character menus, preventing accidental previews and lockups while navigating menus
+- Stopped world-prop targeting scans when a menu or pause state is detected, or a non-fists weapon is drawn during focus
+
 ## [0.4.0] - 2026-08-20
 
 ### Added

@@ -1,5 +1,7 @@
 module MisterChedda.ExamineInteraction
 
+import MisterChedda.ExamineInteraction.Native.CancelLootChoiceEvent
+
 public class ExamineInteractionPropFocusPoll extends DelayCallback {
   private let m_service: wref<ExamineInteractionService>;
   private let m_generation: Uint32;
@@ -67,16 +69,17 @@ public class ExamineInteractionLootActionDispatch extends DelayCallback {
 public class ExamineInteractionLootPublishDispatch extends DelayCallback {
   private let m_service: wref<ExamineInteractionService>;
   private let m_event: ref<InteractionChoiceEvent>;
-  private let m_ownerID: EntityID;
+  // Retain the loot object across removal/despawn until publication finishes.
+  private let m_owner: ref<GameObject>;
   private let m_itemID: ItemID;
   private let m_choiceIndex: Int32;
   private let m_attempt: Int32;
 
-  public static func Create(service: wref<ExamineInteractionService>, event: ref<InteractionChoiceEvent>, ownerID: EntityID, itemID: ItemID, choiceIndex: Int32, attempt: Int32) -> ref<ExamineInteractionLootPublishDispatch> {
+  public static func Create(service: wref<ExamineInteractionService>, event: ref<InteractionChoiceEvent>, owner: ref<GameObject>, itemID: ItemID, choiceIndex: Int32, attempt: Int32) -> ref<ExamineInteractionLootPublishDispatch> {
     let callback = new ExamineInteractionLootPublishDispatch();
     callback.m_service = service;
     callback.m_event = event;
-    callback.m_ownerID = ownerID;
+    callback.m_owner = owner;
     callback.m_itemID = itemID;
     callback.m_choiceIndex = choiceIndex;
     callback.m_attempt = attempt;
@@ -85,7 +88,10 @@ public class ExamineInteractionLootPublishDispatch extends DelayCallback {
 
   public func Call() -> Void {
     if IsDefined(this.m_service) {
-      this.m_service.PublishInspectionLootAction(this.m_event, this.m_ownerID, this.m_itemID, this.m_choiceIndex, this.m_attempt);
+      this.m_service.PublishInspectionLootAction(this.m_event, this.m_owner, this.m_itemID, this.m_choiceIndex, this.m_attempt);
+    } else {
+      CancelLootChoiceEvent(this.m_event);
+      FTLog("[ExamineInteraction] Loot publication callback cancelled: service unavailable.");
     }
   }
 }

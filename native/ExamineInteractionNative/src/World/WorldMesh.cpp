@@ -16,7 +16,7 @@
 #include <RED4ext/Scripting/Natives/Generated/world/InstancedDestructibleMeshNode.hpp>
 #include <RED4ext/Scripting/Natives/Generated/world/InstancedMeshNode.hpp>
 #include <RED4ext/Scripting/Natives/Generated/world/MeshNode.hpp>
-#include <RED4ext/Scripting/Natives/Generated/world/SharedDataBuffer.hpp>
+#include <RED4ext/Scripting/Natives/Generated/world/CookedMeshNode.hpp>
 #include <RED4ext/Scripting/Natives/Transform.hpp>
 
 #include <Windows.h>
@@ -28,6 +28,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <mutex>
 #include <shared_mutex>
@@ -38,7 +39,7 @@ namespace ExamineInteractionNative::World
 {
 namespace Detail
 {
-using WorldNodeInstanceAttach_t = bool (*)(RED4ext::worldINodeInstance*, void*);
+using WorldNodeInstanceAttach_t = void (*)(RED4ext::worldINodeInstance*, void*);
 WorldNodeInstanceAttach_t g_worldNodeInstanceAttachOriginal{};
 WorldNodeInstanceAttach_t g_worldNodeInstanceDetachOriginal{};
 void* g_worldNodeInstanceAttachAddress{};
@@ -52,6 +53,42 @@ std::atomic<RED4ext::worldINodeInstance*> g_lastWorldMeshCandidate{};
 
 std::mutex g_worldMeshSelectionLock;
 WorldMeshSelection g_worldMeshSelection;
+
+// Independent channels keep common static meshes from exhausting rare-node diagnostics.
+std::atomic<uint64_t> g_meshCacheFailures[5]{};
+std::atomic<uint64_t> g_entityCacheFailures{};
+bool DiagnosticDue(std::atomic<uint64_t>& aNext, uint64_t aIntervalMs)
+{
+    if (!Logging::DiagnosticsEnabled()) return false;
+    const auto now = GetTickCount64();
+    auto next = aNext.load(std::memory_order_relaxed);
+    return now >= next && aNext.compare_exchange_strong(next, now + aIntervalMs,
+                                                       std::memory_order_relaxed);
+}
+
+void LogMeshDiagnostic(const char* aStage, const WorldMeshSelection& aSelection)
+{
+    auto* definition = GetWorldNodeDefinition(aSelection.node);
+    uint32_t cookedIndex = UINT32_MAX;
+    uint32_t stride = 0;
+    uint32_t bytes = 0;
+    __try
+    {
+        cookedIndex = *reinterpret_cast<uint32_t*>(
+            reinterpret_cast<std::byte*>(aSelection.node) + 0x88);
+        if (definition && aSelection.kind == WorldMeshSelectionKind::Single && cookedIndex != UINT32_MAX)
+        {
+            stride = *reinterpret_cast<uint32_t*>(reinterpret_cast<std::byte*>(definition) + 0x50);
+            bytes = *reinterpret_cast<uint32_t*>(reinterpret_cast<std::byte*>(definition) + 0x4C);
+        }
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {}
+    Logging::Diagnostic("2.5 mesh %s: type=%s kind=%u node=%p cookedIndex=%u stride=%u bytes=%u instance=%d/%d path=%llu appearance=%llu bounds=%u.",
+                  aStage, definition ? definition->GetType()->GetName().ToString() : "unknown",
+                  static_cast<uint32_t>(aSelection.kind), aSelection.node, cookedIndex, stride, bytes,
+                  aSelection.index, aSelection.count, aSelection.path.hash, aSelection.appearance.hash,
+                  aSelection.localBounds.IsValid() ? 1u : 0u);
+}
 
 struct WorldMeshRayHit
 {
@@ -171,7 +208,7 @@ void RecordNativeQueryProfile(const NativeQueryProfileSample& aSample)
         return static_cast<double>(aValue) / static_cast<double>(aCount);
     };
 
-    Logging::Info(
+    Logging::Diagnostic(
         "PROFILE world query: queries=%llu cacheHits=%llu rebuilds=%llu selected=%llu "
         "avgUs(total=%.2f cacheWait=%.2f nodeWait=%.2f scan=%.2f sort=%.2f) "
         "maxUs(total=%.2f scan=%.2f) avgRebuildNodes(tracked=%.1f tested=%.1f hits=%.1f).",
@@ -189,7 +226,7 @@ void RecordNativeQueryProfile(const NativeQueryProfileSample& aSample)
         toAverage(profile.tracked, rebuilds),
         toAverage(profile.tested, rebuilds),
         toAverage(profile.hits, rebuilds));
-    Logging::Info(
+    Logging::Diagnostic(
         "PROFILE world workload/rebuild: nodes(single=%.1f destructible=%.1f instanced=%.1f foliage=%.1f) "
         "boundsTests(single=%.1f destructible=%.1f instanced=%.1f foliage=%.1f) "
         "cachedBroad(tests=%.1f rejected=%.1f) foliage(miss=%u selected=%u unavailable=%u).",
@@ -276,7 +313,9 @@ WorldMeshSelectionKind GetWorldMeshSelectionKind(RED4ext::worldINodeInstance* aN
     {
         return WorldMeshSelectionKind::Foliage;
     }
-    if (meshNodeType && nodeDefinition->GetType()->IsA(meshNodeType))
+    auto* cookedMeshType = rtti ? rtti->GetClass(RED4ext::world::CookedMeshNode::NAME) : nullptr;
+    if ((meshNodeType && nodeDefinition->GetType()->IsA(meshNodeType)) ||
+        (cookedMeshType && nodeDefinition->GetType()->IsA(cookedMeshType)))
     {
         return WorldMeshSelectionKind::Single;
     }
@@ -386,6 +425,13 @@ void ClearWorldMeshSelection(RED4ext::worldINodeInstance* aExpected = nullptr)
 void StoreWorldMeshSelection(const WorldMeshSelection& aSelection)
 {
     std::scoped_lock lock(g_worldMeshSelectionLock);
+    if (g_worldMeshSelection.node != aSelection.node ||
+        g_worldMeshSelection.index != aSelection.index)
+    {
+        static std::atomic<uint64_t> nextLog[5]{};
+        if (DiagnosticDue(nextLog[static_cast<uint8_t>(aSelection.kind)], 2000))
+            LogMeshDiagnostic("candidate", aSelection);
+    }
     g_worldMeshSelection = aSelection;
     g_lastWorldMeshCandidate.store(aSelection.node, std::memory_order_release);
 }
@@ -408,6 +454,19 @@ void TrackWorldMeshNode(RED4ext::worldINodeInstance* aNodeInstance)
     WorldEntityNodeCache entityCache{};
     const bool isMesh = TryBuildWorldMeshNodeCache(aNodeInstance, cache);
     const bool isEntity = TryBuildWorldEntityNodeCache(aNodeInstance, entityCache);
+    const auto kind = GetWorldMeshSelectionKind(aNodeInstance);
+    if (!isMesh && kind != WorldMeshSelectionKind::None)
+        ++g_meshCacheFailures[static_cast<uint8_t>(kind)];
+    if (!isEntity && IsEntityNodeInstance(aNodeInstance)) ++g_entityCacheFailures;
+    if (isMesh)
+    {
+        static std::atomic<uint64_t> nextLog[5]{};
+        if (DiagnosticDue(nextLog[static_cast<uint8_t>(kind)], 10000))
+            Logging::Diagnostic("2.5 mesh tracked: type=%s kind=%u path=%llu bounds=%u root=%u broad=%u.",
+                cache.definition->GetType()->GetName().ToString(), static_cast<uint32_t>(kind),
+                cache.path.hash, cache.localBounds.IsValid() ? 1u : 0u,
+                cache.rootDataValid ? 1u : 0u, cache.broadBoundsCount);
+    }
     if (!isMesh && !isEntity)
     {
         return;
@@ -441,22 +500,20 @@ void UntrackWorldMeshNode(RED4ext::worldINodeInstance* aNodeInstance)
     ClearWorldMeshSelection(aNodeInstance);
 }
 
-bool WorldNodeInstanceAttachHook(RED4ext::worldINodeInstance* aNodeInstance, void* aContext)
+void WorldNodeInstanceAttachHook(RED4ext::worldINodeInstance* aNodeInstance, void* aContext)
 {
-    const bool attached = g_worldNodeInstanceAttachOriginal &&
-                          g_worldNodeInstanceAttachOriginal(aNodeInstance, aContext);
-    if (attached)
+    if (g_worldNodeInstanceAttachOriginal)
     {
+        g_worldNodeInstanceAttachOriginal(aNodeInstance, aContext);
         TrackWorldMeshNode(aNodeInstance);
     }
-    return attached;
 }
 
-bool WorldNodeInstanceDetachHook(RED4ext::worldINodeInstance* aNodeInstance, void* aContext)
+void WorldNodeInstanceDetachHook(RED4ext::worldINodeInstance* aNodeInstance, void* aContext)
 {
     UntrackWorldMeshNode(aNodeInstance);
-    return g_worldNodeInstanceDetachOriginal &&
-           g_worldNodeInstanceDetachOriginal(aNodeInstance, aContext);
+    if (g_worldNodeInstanceDetachOriginal)
+        g_worldNodeInstanceDetachOriginal(aNodeInstance, aContext);
 }
 
 bool AttachWorldNodeHooks()
@@ -555,7 +612,7 @@ bool TryReadWorldMeshInstance(RED4ext::worldINodeInstance* aNodeInstance,
             reinterpret_cast<std::byte*>(aNodeInstance) + 0x30);
         *aScale = *reinterpret_cast<RED4ext::Vector3*>(
             reinterpret_cast<std::byte*>(aNodeInstance) + 0x50);
-        *aState = *reinterpret_cast<uint16_t*>(reinterpret_cast<std::byte*>(aNodeInstance) + 0x88);
+        *aState = *reinterpret_cast<uint16_t*>(reinterpret_cast<std::byte*>(aNodeInstance) + 0x8C);
         *aMesh = reinterpret_cast<RED4ext::Handle<RED4ext::CMesh>*>(
             reinterpret_cast<std::byte*>(aNodeInstance) + 0x98);
         return true;
@@ -592,7 +649,7 @@ bool IsWorldNodeAttachedAndVisible(RED4ext::worldINodeInstance* aNodeInstance)
     __try
     {
         const auto state = *reinterpret_cast<uint16_t*>(
-            reinterpret_cast<std::byte*>(aNodeInstance) + 0x88);
+            reinterpret_cast<std::byte*>(aNodeInstance) + 0x8C);
         constexpr uint16_t AttachedMask = 1u << 5u;
         constexpr uint16_t VisibleMask = 1u << 9u;
         return (state & AttachedMask) != 0 && (state & VisibleMask) != 0;
@@ -621,47 +678,68 @@ bool TryGetLoadedMeshBounds(RED4ext::ResourcePath aPath, RED4ext::Box& aBounds)
     return aBounds.IsValid();
 }
 
-RED4ext::ResourcePath GetWorldMeshPath(RED4ext::worldINodeInstance* aNodeInstance)
+// 2.5: MeshNodeInstance::LoadMesh and the cooked accessors use instance+0x88
+// as the entry index. State flags moved to +0x8C. See docs/PATCH_2_5.md.
+bool ReadCookedMeshIdentity(RED4ext::worldINodeInstance* instance,
+                            RED4ext::ResourcePath& path, RED4ext::CName& appearance)
 {
-    if (!aNodeInstance)
+    auto* definition = GetWorldNodeDefinition(instance);
+    if (!definition) return false;
+    const auto kind = GetWorldMeshSelectionKind(instance);
+    __try
     {
-        return {};
+        auto* node = reinterpret_cast<const std::byte*>(definition);
+        const auto index = *reinterpret_cast<const uint32_t*>(
+            reinterpret_cast<const std::byte*>(instance) + 0x88);
+        const std::byte* entry{};
+        if (kind == WorldMeshSelectionKind::Instanced)
+        {
+            const auto count = *reinterpret_cast<const uint32_t*>(node + 0x7C);
+            auto* entries = *reinterpret_cast<const std::byte* const*>(node + 0x70);
+            if (!entries || index >= count) return false;
+            entry = entries + static_cast<size_t>(index) * 0x40 + 0x20;
+        }
+        else if (kind == WorldMeshSelectionKind::Foliage)
+        {
+            entry = node + 0x38;
+        }
+        else if (kind == WorldMeshSelectionKind::Single ||
+                 kind == WorldMeshSelectionKind::InstancedDestructible)
+        {
+            if (index == UINT32_MAX)
+                entry = node + 0x38;
+            else
+            {
+                const auto stride = *reinterpret_cast<const uint32_t*>(node + 0x50);
+                const auto bytes = *reinterpret_cast<const uint32_t*>(node + 0x4C);
+                auto* entries = *reinterpret_cast<const std::byte* const*>(node + 0x40);
+                if (!entries || stride < 33 || stride > 256 || index >= bytes / stride)
+                    return false;
+                entry = entries + static_cast<size_t>(index) * stride;
+            }
+        }
+        if (!entry) return false;
+        std::memcpy(&path, entry, sizeof(path));
+        std::memcpy(&appearance, entry + 8, sizeof(appearance));
+        return !path.IsEmpty();
     }
-
-    auto* nodeDefinition = GetWorldNodeDefinition(aNodeInstance);
-    if (!nodeDefinition)
-    {
-        return {};
-    }
-
-    if (GetWorldMeshSelectionKind(aNodeInstance) == WorldMeshSelectionKind::Instanced)
-    {
-        return reinterpret_cast<RED4ext::worldInstancedMeshNode*>(nodeDefinition)->mesh.path;
-    }
-    if (GetWorldMeshSelectionKind(aNodeInstance) == WorldMeshSelectionKind::Foliage)
-    {
-        return reinterpret_cast<RED4ext::worldFoliageNode*>(nodeDefinition)->mesh.path;
-    }
-    return reinterpret_cast<RED4ext::worldMeshNode*>(nodeDefinition)->mesh.path;
+    __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
 }
 
-RED4ext::CName GetWorldMeshAppearance(RED4ext::worldINodeInstance* aNodeInstance)
+RED4ext::ResourcePath GetWorldMeshPath(RED4ext::worldINodeInstance* instance)
 {
-    auto* nodeDefinition = GetWorldNodeDefinition(aNodeInstance);
-    if (!nodeDefinition)
-    {
-        return {};
-    }
+    RED4ext::ResourcePath path{};
+    RED4ext::CName appearance{};
+    if (instance) ReadCookedMeshIdentity(instance, path, appearance);
+    return path;
+}
 
-    if (GetWorldMeshSelectionKind(aNodeInstance) == WorldMeshSelectionKind::Instanced)
-    {
-        return reinterpret_cast<RED4ext::worldInstancedMeshNode*>(nodeDefinition)->meshAppearance;
-    }
-    if (GetWorldMeshSelectionKind(aNodeInstance) == WorldMeshSelectionKind::Foliage)
-    {
-        return reinterpret_cast<RED4ext::worldFoliageNode*>(nodeDefinition)->meshAppearance;
-    }
-    return reinterpret_cast<RED4ext::worldMeshNode*>(nodeDefinition)->meshAppearance;
+RED4ext::CName GetWorldMeshAppearance(RED4ext::worldINodeInstance* instance)
+{
+    RED4ext::ResourcePath path{};
+    RED4ext::CName appearance{};
+    if (instance) ReadCookedMeshIdentity(instance, path, appearance);
+    return appearance;
 }
 
 bool IsPathExcluded(RED4ext::ResourcePath aPath,
@@ -765,7 +843,7 @@ bool SetVisible(const NodeHandle& aNode, bool aVisible)
             WorldMeshSelection selection{};
             ReadWorldMeshSelection(locked.GetPtr(), selection);
 #if EXAMINE_INTERACTION_PROFILE_NATIVE
-            Logging::Info("Grouped world mesh visibility left unchanged: kind=%u index=%d count=%d visible=%u.",
+            Logging::Diagnostic("Grouped world mesh visibility left unchanged: kind=%u index=%d count=%d visible=%u.",
                           static_cast<uint32_t>(kind), selection.index, selection.count,
                           aVisible ? 1u : 0u);
 #endif
@@ -783,10 +861,8 @@ bool SetVisible(const NodeHandle& aNode, bool aVisible)
         static RED4ext::UniversalRelocFunc<SetRenderProxyVisibility> setVisibility(
             Addresses::RenderProxySetVisibility);
         setVisibility(renderProxy->GetPtr(), aVisible);
-#if EXAMINE_INTERACTION_PROFILE_NATIVE
-        Logging::Info("World mesh render-proxy visibility set: instance=%p visible=%u.",
+        Logging::Diagnostic("World mesh render-proxy visibility set: instance=%p visible=%u.",
                       locked.GetPtr(), aVisible ? 1u : 0u);
-#endif
         return true;
     }
 
@@ -795,7 +871,7 @@ bool SetVisible(const NodeHandle& aNode, bool aVisible)
         Addresses::WorldNodeInstanceSetVisibility);
     setVisibility(locked.GetPtr(), aVisible);
 #if EXAMINE_INTERACTION_PROFILE_NATIVE
-    Logging::Info("World node visibility set through node state: instance=%p visible=%u.",
+    Logging::Diagnostic("World node visibility set through node state: instance=%p visible=%u.",
                   locked.GetPtr(), aVisible ? 1u : 0u);
 #endif
     return true;
@@ -991,7 +1067,7 @@ NodeHandle FindNode(RED4ext::Vector4 aOrigin, RED4ext::Vector4 aDirection,
     const auto query = queryCount.fetch_add(1, std::memory_order_relaxed) + 1;
     if (query <= 8 || (query % 50) == 0)
     {
-        Logging::Info("World mesh bounds query: tracked=%llu tested=%u intersected=%u excluded=%u found=%u distance=%.3f.",
+        Logging::Diagnostic("World mesh bounds query: tracked=%llu tested=%u intersected=%u excluded=%u found=%u distance=%.3f.",
                       static_cast<unsigned long long>(tracked), tested, intersected,
                       aExcluded.Size(), nearest ? 1u : 0u,
                       nearest ? nearestDistance : -1.0f);
@@ -1020,6 +1096,8 @@ EntityHandle FindEntity(RED4ext::Vector4 aOrigin, RED4ext::Vector4 aDirection,
     float nearestAimError = std::numeric_limits<float>::max();
     RED4ext::entEntity* nearest{};
     uint32_t tested{};
+    uint32_t hidden{};
+    uint32_t missingHandle{};
     uint32_t intersected{};
     std::size_t tracked{};
     {
@@ -1029,12 +1107,14 @@ EntityHandle FindEntity(RED4ext::Vector4 aOrigin, RED4ext::Vector4 aDirection,
         {
             if (!instance || !IsWorldNodeAttachedAndVisible(instance))
             {
+                ++hidden;
                 continue;
             }
 
             auto* entity = GetWorldEntity(instance);
             if (!entity)
             {
+                ++missingHandle;
                 continue;
             }
 
@@ -1087,18 +1167,14 @@ EntityHandle FindEntity(RED4ext::Vector4 aOrigin, RED4ext::Vector4 aDirection,
         }
     }
 
-#if EXAMINE_INTERACTION_PROFILE_NATIVE
-    static std::atomic<uint32_t> queryCount{};
-    const auto query = queryCount.fetch_add(1, std::memory_order_relaxed) + 1;
-    if (query <= 8 || (query % 50) == 0)
-    {
-        Logging::Info("World entity bounds query: tracked=%llu tested=%u intersected=%u excluded=%u found=%u distance=%.3f aimError=%.6f.",
-                      static_cast<unsigned long long>(tracked), tested, intersected,
-                      aExcluded.Size(), nearest ? 1u : 0u,
-                      nearest ? nearestDistance : -1.0f,
-                      nearest ? nearestAimError : -1.0f);
-    }
-#endif
+    static std::atomic<uint64_t> nextEntityLog{};
+    if (DiagnosticDue(nextEntityLog, 5000))
+        Logging::Diagnostic("2.5 entity query: tracked=%llu cacheFailed=%llu hidden=%u handleMissing=%u tested=%u intersected=%u excluded=%u found=%u distance=%.3f aimError=%.6f.",
+            static_cast<unsigned long long>(tracked),
+            static_cast<unsigned long long>(g_entityCacheFailures.load()), hidden, missingHandle, tested, intersected,
+            aExcluded.Size(), nearest ? 1u : 0u, nearest ? nearestDistance : -1.0f,
+            nearest ? nearestAimError : -1.0f);
+
     return ToWeakHandle(nearest);
 }
 
@@ -1189,6 +1265,24 @@ PathReference FindPath(RED4ext::Vector4 aOrigin, RED4ext::Vector4 aDirection,
         const auto sortStart = ProfileClock::now();
 #endif
 
+        static std::atomic<uint64_t> nextProbeLog{};
+        if (DiagnosticDue(nextProbeLog, 5000))
+        {
+            Logging::Diagnostic("2.5 mesh query: nodes(single=%u instanced=%u destructible=%u foliage=%u) cacheFailed(single=%llu instanced=%llu destructible=%llu foliage=%llu) hits=%llu.",
+                probeStats.singleNodes, probeStats.instancedNodes, probeStats.instancedDestructibleNodes, probeStats.foliageNodes,
+                g_meshCacheFailures[1].load(), g_meshCacheFailures[3].load(),
+                g_meshCacheFailures[2].load(), g_meshCacheFailures[4].load(),
+                static_cast<unsigned long long>(g_worldMeshRayCache.hits.size()));
+            Logging::Diagnostic("2.5 foliage probe: nodes=%u hidden=%u rootFailed=%u boundsMissing=%u populationUnavailable=%u rayMiss=%u selected=%u testedInstances=%llu.",
+                probeStats.foliageNodes, probeStats.foliageNotVisible, probeStats.foliageRootReadFailed,
+                probeStats.foliageBoundsUnavailable, probeStats.foliagePopulationUnavailable,
+                probeStats.foliageNoIntersection, probeStats.foliageSelected, probeStats.foliageInstanceTests);
+            Logging::Diagnostic("2.5 destructible probe: nodes=%u hidden=%u boundsMissing=%u transformsUnavailable=%u selected=%u testedInstances=%llu.",
+                probeStats.instancedDestructibleNodes, probeStats.destructibleHidden,
+                probeStats.destructibleBoundsUnavailable, probeStats.destructibleTransformsUnavailable,
+                probeStats.destructibleSelected, probeStats.instancedDestructibleInstanceTests);
+        }
+
         std::sort(g_worldMeshRayCache.hits.begin(), g_worldMeshRayCache.hits.end(),
                   [](const WorldMeshRayHit& aLeft, const WorldMeshRayHit& aRight) {
                        return aLeft.distance < aRight.distance;
@@ -1203,12 +1297,12 @@ PathReference FindPath(RED4ext::Vector4 aOrigin, RED4ext::Vector4 aDirection,
         const auto build = buildCount.fetch_add(1, std::memory_order_relaxed) + 1;
         if (build <= 4 || (build % 100) == 0)
         {
-            Logging::Info("World mesh ray cache rebuilt: tracked=%llu tested=%u hits=%llu.",
+            Logging::Diagnostic("World mesh ray cache rebuilt: tracked=%llu tested=%u hits=%llu.",
                           static_cast<unsigned long long>(g_worldMeshNodes.size()), tested,
                           static_cast<unsigned long long>(g_worldMeshRayCache.hits.size()));
             if (probeStats.foliageNodes != 0)
             {
-                Logging::Info("Foliage ray diagnostics: tracked=%u hidden=%u root=%u bounds=%u population=%u miss=%u selected=%u.",
+                Logging::Diagnostic("Foliage ray diagnostics: tracked=%u hidden=%u root=%u bounds=%u population=%u miss=%u selected=%u.",
                               probeStats.foliageNodes, probeStats.foliageNotVisible,
                               probeStats.foliageRootReadFailed, probeStats.foliageBoundsUnavailable,
                               probeStats.foliagePopulationUnavailable,
@@ -1260,6 +1354,11 @@ NodeHandle AcquireCandidate()
     }
 
     std::shared_lock lock(g_worldMeshNodesLock);
-    return g_worldMeshNodes.contains(instance) ? ToWeakHandle(instance) : NodeHandle{};
+    if (!g_worldMeshNodes.contains(instance)) return {};
+    WorldMeshSelection selection;
+    static std::atomic<uint64_t> nextAcquiredLog{};
+    if (ReadWorldMeshSelection(instance, selection) && DiagnosticDue(nextAcquiredLog, 1000))
+        LogMeshDiagnostic("acquired", selection);
+    return ToWeakHandle(instance);
 }
 } // namespace ExamineInteractionNative::World

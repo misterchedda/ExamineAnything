@@ -5,7 +5,6 @@
 #include <RED4ext/Scripting/Natives/Generated/world/FoliageNode.hpp>
 #include <RED4ext/Scripting/Natives/Generated/world/InstancedDestructibleMeshNode.hpp>
 #include <RED4ext/Scripting/Natives/Generated/world/InstancedMeshNode.hpp>
-#include <RED4ext/Scripting/Natives/Generated/world/SharedDataBuffer.hpp>
 #include <RED4ext/Scripting/Natives/Generated/WorldTransform.hpp>
 
 #include <Windows.h>
@@ -40,7 +39,7 @@ static_assert(sizeof(RenderProxyTransform) == 0x30);
 }
 
 bool TryGetRenderProxyTransforms(
-    RED4ext::worldInstancedMeshNode* aDefinition,
+    RED4ext::worldInstancedMeshNode* aDefinition, RED4ext::worldINodeInstance* aInstance,
     const RenderProxyTransform*& aTransforms, int32_t& aCount)
 {
     aTransforms = nullptr;
@@ -52,23 +51,25 @@ bool TryGetRenderProxyTransforms(
 
     __try
     {
-        const auto& authored = aDefinition->worldTransformsBuffer;
-        if (!authored.sharedDataBuffer || authored.numElements == 0)
+        auto* node = reinterpret_cast<const std::byte*>(aDefinition);
+        const auto index = *reinterpret_cast<const uint32_t*>(
+            reinterpret_cast<const std::byte*>(aInstance) + 0x88);
+        // Engine span accessor at 2.5 RVA 0x20BF910.
+        const auto& direct = *reinterpret_cast<const RED4ext::DynArray<RenderProxyTransform>*>(node + 0x60);
+        if (direct.size() != 0)
         {
-            return false;
+            aTransforms = direct.Data();
+            aCount = static_cast<int32_t>(direct.size());
+            return aTransforms && aCount > 0;
         }
-
-        const auto& raw = authored.sharedDataBuffer->buffer.buffer;
-        const auto totalCount = static_cast<uint64_t>(raw.size) /
-                                sizeof(RenderProxyTransform);
-        const auto begin = static_cast<uint64_t>(authored.startIndex);
-        const auto count = static_cast<uint64_t>(authored.numElements);
-        if (!raw.data || begin > totalCount || count > totalCount - begin ||
-            count > static_cast<uint64_t>(std::numeric_limits<int32_t>::max()))
-        {
-            return false;
-        }
-
+        const auto rangeCount = *reinterpret_cast<const uint32_t*>(node + 0x8C);
+        auto* ranges = *reinterpret_cast<const uint16_t* const*>(node + 0x80);
+        if (!ranges || index >= rangeCount) return false;
+        const auto begin = static_cast<uint32_t>(ranges[index * 2]);
+        const auto count = static_cast<uint32_t>(ranges[index * 2 + 1]);
+        const auto& raw = aDefinition->cookedWorldTransformsBuffer.buffer;
+        const auto total = raw.size / sizeof(RenderProxyTransform);
+        if (!raw.data || begin > total || count > total - begin || !count) return false;
         aTransforms = reinterpret_cast<const RenderProxyTransform*>(raw.data) + begin;
         aCount = static_cast<int32_t>(count);
         return true;
@@ -94,24 +95,10 @@ bool TryGetCookedInstanceTransforms(
 
     __try
     {
-        const auto& cooked = aDefinition->cookedInstanceTransforms;
-        if (!cooked.sharedDataBuffer || cooked.numElements == 0)
-        {
-            return false;
-        }
-
-        const auto& raw = cooked.sharedDataBuffer->buffer.buffer;
-        const auto totalCount = static_cast<uint64_t>(raw.size) / sizeof(RED4ext::Transform);
-        const auto begin = static_cast<uint64_t>(cooked.startIndex);
-        const auto count = static_cast<uint64_t>(cooked.numElements);
-        if (!raw.data || begin > totalCount || count > totalCount - begin ||
-            count > static_cast<uint64_t>(std::numeric_limits<int32_t>::max()))
-        {
-            return false;
-        }
-
-        aTransforms = reinterpret_cast<const RED4ext::Transform*>(raw.data) + begin;
-        aCount = static_cast<int32_t>(count);
+        const auto& transforms = aDefinition->instanceTransforms;
+        aTransforms = transforms.Data();
+        aCount = static_cast<int32_t>(transforms.size());
+        if (!aTransforms || aCount <= 0) return false;
         return true;
     }
     __except (EXCEPTION_EXECUTE_HANDLER)
@@ -376,7 +363,7 @@ bool TryBuildWorldMeshNodeCache(RED4ext::worldINodeInstance* aNodeInstance,
         const RenderProxyTransform* authoredTransforms{};
         int32_t authoredInstanceCount{};
         if (aCache.localBounds.IsValid() &&
-            TryGetRenderProxyTransforms(definition, authoredTransforms,
+            TryGetRenderProxyTransforms(definition, aNodeInstance, authoredTransforms,
                                         authoredInstanceCount))
         {
             RED4ext::Box aggregate{};
@@ -488,6 +475,8 @@ bool TrySelectWorldMeshInstance(RED4ext::worldINodeInstance* aNodeInstance,
     }
     if (!IsWorldNodeAttachedAndVisible(aNodeInstance))
     {
+        if (kind == WorldMeshSelectionKind::InstancedDestructible && aProbeStats)
+            ++aProbeStats->destructibleHidden;
         if (kind == WorldMeshSelectionKind::Foliage && aProbeStats)
         {
             ++aProbeStats->foliageNotVisible;
@@ -593,6 +582,10 @@ bool TrySelectWorldMeshInstance(RED4ext::worldINodeInstance* aNodeInstance,
         TryGetLoadedMeshBounds(path, localBounds);
     }
 
+    if (kind == WorldMeshSelectionKind::InstancedDestructible &&
+        !localBounds.IsValid() && aProbeStats)
+        ++aProbeStats->destructibleBoundsUnavailable;
+
     float nearestDistance = std::numeric_limits<float>::max();
     int32_t nearestIndex = -1;
     RED4ext::Box nearestWorldBounds{};
@@ -619,6 +612,7 @@ bool TrySelectWorldMeshInstance(RED4ext::worldINodeInstance* aNodeInstance,
         const RED4ext::Transform* cookedTransforms{};
         if (!TryGetCookedInstanceTransforms(definition, cookedTransforms, cookedInstanceCount))
         {
+            if (aProbeStats) ++aProbeStats->destructibleTransformsUnavailable;
             return false;
         }
 
@@ -748,7 +742,7 @@ bool TrySelectWorldMeshInstance(RED4ext::worldINodeInstance* aNodeInstance,
             nodeDefinition);
         const RenderProxyTransform* authoredTransforms{};
         if (!localBounds.IsValid() ||
-            !TryGetRenderProxyTransforms(definition, authoredTransforms,
+            !TryGetRenderProxyTransforms(definition, aNodeInstance, authoredTransforms,
                                          authoredInstanceCount))
         {
             return false;
@@ -834,6 +828,8 @@ bool TrySelectWorldMeshInstance(RED4ext::worldINodeInstance* aNodeInstance,
                 ->populationSpanInfo.stancesCount);
     }
 
+    if (kind == WorldMeshSelectionKind::InstancedDestructible && aProbeStats)
+        ++aProbeStats->destructibleSelected;
     aSelection.node = aNodeInstance;
     aSelection.kind = kind;
     aSelection.index = nearestIndex;

@@ -1,5 +1,7 @@
 module MisterChedda.ExamineInteraction.Native
 
+public native func SetDiagnosticLogging(enabled: Bool) -> Void;
+
 public native func SetDof(
   intensity: Float,
   nearBlur: Float,
@@ -19,6 +21,8 @@ public native func PrepareLootChoiceEvent(
   removeItem: Bool,
   illegal: Bool
 ) -> Bool;
+
+public native func CancelLootChoiceEvent(event: ref<InteractionChoiceEvent>) -> Void;
 
 public native func PublishLootChoiceEvent(
   event: ref<InteractionChoiceEvent>,

@@ -142,10 +142,11 @@ public class ExamineInteractionService extends ScriptableService {
     let handler = GameInstance.GetCallbackSystem()
       .RegisterCallback(n"Input/Key", this, n"OnExamineInteractionKey");
 
-    handler.AddTarget(InputTarget.Key(this.m_examineKeyboardKey, EInputAction.IACT_Press));
-    handler.AddTarget(InputTarget.Key(this.m_examineKeyboardKey, EInputAction.IACT_Release));
+    // Filter press/release in OnExamineInteractionKey; the 2.5 bundle's
+    // optional second Key parameter differs from Codeware's native signature.
+    handler.AddTarget(InputTarget.Key(this.m_examineKeyboardKey));
     if NotEquals(this.m_examineControllerKey, this.m_examineKeyboardKey) {
-      handler.AddTarget(InputTarget.Key(this.m_examineControllerKey, EInputAction.IACT_Release));
+      handler.AddTarget(InputTarget.Key(this.m_examineControllerKey));
     }
   }
 
@@ -258,6 +259,7 @@ public class ExamineInteractionService extends ScriptableService {
 
   public final func OnSettingsChanged() -> Void {
     let dof: ref<ExamineInteractionSceneDOF>;
+    SetDiagnosticLogging(ExamineInteractionLog.DiagnosticsEnabled());
     this.RefreshInputBindings();
     if IsDefined(this.m_controller) {
       this.m_controller.ExamineInteractionSetWorldPropPrompt(
@@ -294,6 +296,7 @@ public class ExamineInteractionService extends ScriptableService {
     if IsDefined(controller) {
       // Mod Settings can restore persisted values after the service itself loads, so resolve again at HUD session attach
       if attaching {
+        SetDiagnosticLogging(ExamineInteractionLog.DiagnosticsEnabled());
         this.RefreshInputBindings();
         this.RegisterAimListener();
       }
@@ -594,11 +597,11 @@ public class ExamineInteractionService extends ScriptableService {
     }
 
     choiceEvent = new InteractionChoiceEvent();
+    choiceEvent.hotspot = owner;
     if !PrepareLootChoiceEvent(choiceEvent, context.itemID, vanillaAction, true, false) {
       FTLog(s"[ExamineInteraction] Vanilla loot interaction could not be prepared: action=\(NameToString(actionName)) item=\(TDBID.ToStringDEBUG(ItemID.GetTDBID(context.itemID)))");
       return;
     }
-    choiceEvent.hotspot = owner;
     choiceEvent.activator = player;
     choiceEvent.layerData.tag = n"Loot";
     if selectedChoice.isHoldAction {
@@ -614,6 +617,7 @@ public class ExamineInteractionService extends ScriptableService {
 
     lootAction = LootChoiceActionWrapper.Unwrap(choiceEvent);
     if !LootChoiceActionWrapper.IsValid(lootAction) {
+      CancelLootChoiceEvent(choiceEvent);
       FTLog(s"[ExamineInteraction] Vanilla loot interaction rejected before dispatch: action=\(NameToString(actionName)) inputAction=\(NameToString(selectedChoice.inputAction)) item=\(TDBID.ToStringDEBUG(ItemID.GetTDBID(context.itemID)))");
       return;
     }
@@ -663,6 +667,7 @@ public class ExamineInteractionService extends ScriptableService {
     }
 
     if !actionHandled {
+      CancelLootChoiceEvent(choiceEvent);
       FTLog(s"[ExamineInteraction] Inspection loot action failed before success publication: action=\(NameToString(actionName)) item=\(TDBID.ToStringDEBUG(ItemID.GetTDBID(context.itemID)))");
       return;
     }
@@ -678,34 +683,41 @@ public class ExamineInteractionService extends ScriptableService {
     }
 
     GameInstance.GetDelaySystem(GetGameInstance()).DelayCallback(
-      ExamineInteractionLootPublishDispatch.Create(this, choiceEvent, context.ownerID, context.itemID, context.sourceChoiceIndices[choiceIndex], 0),
+      ExamineInteractionLootPublishDispatch.Create(this, choiceEvent, owner, context.itemID, context.sourceChoiceIndices[choiceIndex], 0),
       0.05,
       false
     );
   }
 
-  public final func PublishInspectionLootAction(event: ref<InteractionChoiceEvent>, ownerID: EntityID, itemID: ItemID, sourceChoiceIndex: Int32, attempt: Int32) -> Void {
-    let owner = GameInstance.FindEntityByID(GetGameInstance(), ownerID) as GameObject;
+  public final func PublishInspectionLootAction(event: ref<InteractionChoiceEvent>, owner: ref<GameObject>, itemID: ItemID, sourceChoiceIndex: Int32, attempt: Int32) -> Void {
     let transactionSystem = GameInstance.GetTransactionSystem(GetGameInstance());
 
     if !IsDefined(event) || !IsDefined(owner) {
+      CancelLootChoiceEvent(event);
+      FTLog("[ExamineInteraction] Loot publication callback cancelled: event or retained owner unavailable.");
       return;
+    }
+
+    if attempt == 0 {
+      ExamineInteractionLog.Diagnostic(s"[ExamineInteraction] Loot publication callback: ownerRegistered=\(IsDefined(GameInstance.FindEntityByID(GetGameInstance(), owner.GetEntityID()))) remaining=\(transactionSystem.GetItemQuantity(owner, itemID))");
     }
 
     if transactionSystem.GetItemQuantity(owner, itemID) > 0 {
       if attempt < 100 {
         GameInstance.GetDelaySystem(GetGameInstance()).DelayCallback(
-          ExamineInteractionLootPublishDispatch.Create(this, event, ownerID, itemID, sourceChoiceIndex, attempt + 1),
+          ExamineInteractionLootPublishDispatch.Create(this, event, owner, itemID, sourceChoiceIndex, attempt + 1),
           0.05,
           false
         );
       } else {
+        CancelLootChoiceEvent(event);
         FTLog(s"[ExamineInteraction] Vanilla loot interaction completed without removing the item; the success notification was not published. item=\(TDBID.ToStringDEBUG(ItemID.GetTDBID(itemID)))");
       }
       return;
     }
 
     if !PublishLootChoiceEvent(event, sourceChoiceIndex) {
+      CancelLootChoiceEvent(event);
       FTLog(s"[ExamineInteraction] Vanilla loot interaction succeeded, but its interaction-manager success notification could not be published. item=\(TDBID.ToStringDEBUG(ItemID.GetTDBID(itemID)))");
     }
   }
@@ -887,11 +899,24 @@ public class ExamineInteractionService extends ScriptableService {
     return removed;
   }
   
+  private final func IsExamineBlockedByMenu() -> Bool {
+    let game = GetGameInstance();
+    let uiBlackboard = GameInstance.GetBlackboardSystem(game).Get(GetAllBlackboardDefs().UI_System);
+    return GameInstance.GetTimeSystem(game).IsPausedState()
+      || (IsDefined(uiBlackboard) && uiBlackboard.GetBool(GetAllBlackboardDefs().UI_System.IsInMenu));
+  }
+
   private cb func OnExamineInteractionKey(evt: ref<KeyInputEvent>) -> Void {
     let sourceEntity: wref<Entity>;
     let meshAppearance: CName;
     let meshPath: ResRef;
     let sourceNode: wref<worldINodeInstance>;
+
+    if this.IsExamineBlockedByMenu() {
+      this.ExamineInteractionStopPropFocus("menu or pause active");
+      this.ClearExamineWalkSuppression();
+      return;
+    }
 
     if !this.IsEnabled() {
       return;
@@ -931,7 +956,7 @@ public class ExamineInteractionService extends ScriptableService {
       sourceEntity = this.m_examineEntityCandidate;
       if IsDefined(sourceEntity)
         && ResRef.IsValid(this.m_examineEntityTemplatePath) {
-        FTLog(s"[ExamineInteraction] Examine pressed on curated world entity: class=\(NameToString(sourceEntity.GetClassName())) template=\(ResRef.ToString(this.m_examineEntityTemplatePath)) appearance=\(NameToString(sourceEntity.GetCurrentAppearanceName()))");
+        ExamineInteractionLog.Diagnostic(s"[ExamineInteraction] Examine pressed on curated world entity: class=\(NameToString(sourceEntity.GetClassName())) template=\(ResRef.ToString(this.m_examineEntityTemplatePath)) appearance=\(NameToString(sourceEntity.GetCurrentAppearanceName()))");
         this.ShowWorldEntity(sourceEntity);
         this.ExamineInteractionStopPropFocus("curated entity examine confirmed");
         return;
@@ -953,7 +978,7 @@ public class ExamineInteractionService extends ScriptableService {
       if Equals(meshAppearance, n"") {
         meshAppearance = n"default";
       }
-      FTLog(s"[ExamineInteraction] Examine pressed on curated world prop: mesh=\(ResRef.ToString(meshPath)) appearance=\(NameToString(meshAppearance)) grouped=\(IsWorldNodeGrouped(sourceNode)) selection=\(GetWorldNodeSelectionIndex(sourceNode))/\(GetWorldNodeSelectionCount(sourceNode))");
+      ExamineInteractionLog.Diagnostic(s"[ExamineInteraction] Examine pressed on curated world prop: mesh=\(ResRef.ToString(meshPath)) appearance=\(NameToString(meshAppearance)) grouped=\(IsWorldNodeGrouped(sourceNode)) selection=\(GetWorldNodeSelectionIndex(sourceNode))/\(GetWorldNodeSelectionCount(sourceNode))");
       this.PlayExamineWorldMeshSound(meshPath);
       ExamineInteractionPopup.ShowWorldMesh(
         sourceNode,
@@ -975,7 +1000,7 @@ public class ExamineInteractionService extends ScriptableService {
     let player = this.GetPlayer();
     let weapon: ref<WeaponObject>;
   
-    if !this.IsEnabled() {
+    if !this.IsEnabled() || this.IsExamineBlockedByMenu() {
       return;
     }
 
@@ -1046,6 +1071,8 @@ public class ExamineInteractionService extends ScriptableService {
     let startPosition: Vector4;
     let lookedAtObject: ref<GameObject>;
     let trace: TraceResult;
+    let weapon: ref<WeaponObject>;
+    let weaponID: EntityID;
   
     if generation != this.m_examinePropFocusGeneration
       || !this.m_examinePropFocusHeld
@@ -1053,10 +1080,26 @@ public class ExamineInteractionService extends ScriptableService {
       return;
     }
 
+    // Recheck before targeting: menus or equipment can change after focus starts.
+    if this.IsExamineBlockedByMenu() {
+      this.ExamineInteractionStopPropFocus("menu or pause active");
+      return;
+    }
+    weapon = GameObject.GetActiveWeapon(player);
+    if IsDefined(weapon) && !WeaponObject.IsFists(weapon.GetItemID()) {
+      this.ExamineInteractionStopPropFocus("active non-fists weapon");
+      return;
+    }
+
     this.m_examinePropFocusPolls += 1;
   
     if !this.m_examineInteractionVisible {
+      weapon = GameObject.GetRightActiveWeapon(player);
+      if IsDefined(weapon) {
+        weaponID = weapon.GetEntityID();
+      }
       GameInstance.GetTargetingSystem(player.GetGame()).GetCrosshairData(
+        weaponID,
         player,
         startPosition,
         aimForward
@@ -1585,13 +1628,13 @@ public class ExamineInteractionService extends ScriptableService {
       return;
     }
   
-    FTLog(s"[ExamineInteraction] Resolved via \(resolvedBy): class=\(NameToString(itemObject.GetClassName())) id=\(EntityID.ToDebugString(itemObject.GetEntityID())) template=\(ResRef.ToString(itemObject.GetTemplatePath())) appearance=\(NameToString(itemObject.GetCurrentAppearanceName()))");
+    ExamineInteractionLog.Diagnostic(s"[ExamineInteraction] Resolved via \(resolvedBy): class=\(NameToString(itemObject.GetClassName())) id=\(EntityID.ToDebugString(itemObject.GetEntityID())) template=\(ResRef.ToString(itemObject.GetTemplatePath())) appearance=\(NameToString(itemObject.GetCurrentAppearanceName()))");
   
     if ExamineInteractionLog.DiagnosticsEnabled() {
       components = itemObject.GetComponents();
       i = 0;
       while i < ArraySize(components) {
-        FTLog(s"[ExamineInteraction] Item component[\(i)] class=\(NameToString(components[i].GetClassName())) name=\(NameToString(components[i].GetName()))");
+        ExamineInteractionLog.Diagnostic(s"[ExamineInteraction] Item component[\(i)] class=\(NameToString(components[i].GetClassName())) name=\(NameToString(components[i].GetName()))");
         i += 1;
       }
     }

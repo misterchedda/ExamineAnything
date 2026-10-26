@@ -16,6 +16,9 @@
 #include <chrono>
 #include <cstdint>
 #include <mutex>
+#include <memory>
+#include <unordered_map>
+#include <RED4ext/Memory/SharedPtr.hpp>
 
 namespace ExamineInteractionNative::Interaction
 {
@@ -25,7 +28,7 @@ using LootChoice = RED4ext::game::interactions::LootChoiceActionWrapper;
 using Choice = RED4ext::game::interactions::Choice;
 using BuildLootChoice = Choice* (*)(LootChoice*, Choice*);
 using SerializableHandle = RED4ext::Handle<RED4ext::ISerializable>;
-using BuildPublisherChoiceEvent = void (*)(SerializableHandle*, Choice*, uint32_t*);
+using BuildPublisherChoiceEvent = SerializableHandle* (*)(SerializableHandle*, Choice*, uint32_t*);
 using PublishInteractionEvent = void (*)(void*, SerializableHandle*, void*, void*, void*);
 
 struct PublisherBridge
@@ -36,11 +39,11 @@ struct PublisherBridge
 
 struct PublishContext
 {
-    void* hotspot{};
+    RED4ext::WeakPtr<void> hotspot;
     uint64_t hotspotEntityID{};
     void* publisher{};
-    void* layer{};
-    void* activator{};
+    RED4ext::WeakHandle<RED4ext::ISerializable> layer;
+    RED4ext::WeakPtr<void> activator;
     std::chrono::steady_clock::time_point capturedAt{};
     uint64_t sequence{};
 };
@@ -65,22 +68,68 @@ uint64_t GetEntityID(void* aObject)
     return aObject ? reinterpret_cast<RED4ext::game::Object*>(aObject)->entityID.hash : 0;
 }
 
-bool IsLivePublishContext(const PublishContext& aContext)
+// CHotSpot/CActivator use AtomicSharedStorage, not ISerializable handles.
+// Release through the game's verified shared-storage destructor.
+using ReleaseInteractionReference = void (*)(void*);
+ReleaseInteractionReference g_releaseInteractionReference{};
+struct NativeInteractionReference
 {
-    if (!aContext.hotspot || !aContext.publisher || !aContext.layer || !aContext.activator)
+    void* instance{};
+    RED4ext::RefCnt* refCount{};
+    explicit NativeInteractionReference(const RED4ext::WeakPtr<void>& aWeak)
     {
-        return false;
+        if (aWeak.refCount && aWeak.refCount->IncRefIfNotZero())
+        {
+            instance = aWeak.instance;
+            refCount = aWeak.refCount;
+        }
     }
+    NativeInteractionReference(const NativeInteractionReference&) = delete;
+    ~NativeInteractionReference()
+    {
+        if (refCount) g_releaseInteractionReference(this);
+    }
+};
+static_assert(sizeof(NativeInteractionReference) == 0x10);
+struct PendingContext
+{
+    std::shared_ptr<NativeInteractionReference> hotspot;
+    std::shared_ptr<NativeInteractionReference> activator;
+    SerializableHandle event; // Keep the key unique if an engine queue is discarded.
+};
+using ProcessPublishRequest = void (*)(void*, void*);
+ProcessPublishRequest g_processPublishOriginal{};
+void* g_processPublishAddress{};
+std::mutex g_pendingMutex;
+std::unordered_map<void*, PendingContext> g_pendingContexts;
+struct PreparedContext
+{
+    void* publisher{};
+    uint64_t ownerID{};
+    PendingContext retained;
+    SerializableHandle layer;
+};
+std::unordered_map<void*, PreparedContext> g_preparedContexts;
 
-    const auto hotspot = reinterpret_cast<uintptr_t>(aContext.hotspot);
-    const auto layer = reinterpret_cast<uintptr_t>(aContext.layer);
-    const auto activator = reinterpret_cast<uintptr_t>(aContext.activator);
-    return *reinterpret_cast<void* const*>(
-               hotspot + Addresses::InteractionHotspotSelfHandleOffset) == aContext.hotspot &&
-           *reinterpret_cast<void* const*>(
-               layer + Addresses::InteractionLayerSelfHandleOffset) == aContext.layer &&
-           *reinterpret_cast<void* const*>(
-               activator + Addresses::InteractionActivatorSelfHandleOffset) == aContext.activator;
+
+void ProcessPublishRequestHook(void* aPublisher, void* aRequest)
+{
+    // The request owns its event at +0, but only weakly owns the hotspot.
+    auto* event = *reinterpret_cast<void**>(aRequest);
+    PendingContext retained;
+    {
+        std::scoped_lock lock(g_pendingMutex);
+        auto it = g_pendingContexts.find(event);
+        if (it != g_pendingContexts.end())
+        {
+            retained = std::move(it->second);
+            g_pendingContexts.erase(it);
+        }
+    }
+    g_processPublishOriginal(aPublisher, aRequest);
+    if (retained.hotspot)
+        Logging::Diagnostic("Vanilla loot success notification processed.");
+    // Release only after the original processor has finished using the hotspot.
 }
 
 void CapturePublishContext(void* aPublisher, void* aHotspot, void* aLayer, void* aActivator)
@@ -90,21 +139,23 @@ void CapturePublishContext(void* aPublisher, void* aHotspot, void* aLayer, void*
         return;
     }
 
-    PublishContext context{
-        aHotspot,
-        *reinterpret_cast<const uint64_t*>(
-            reinterpret_cast<uintptr_t>(aHotspot) + Addresses::InteractionHotspotEntityIDOffset),
-        aPublisher,
-        aLayer,
-        aActivator,
-        std::chrono::steady_clock::now(),
-        ++g_publishContextSequence,
-    };
+    PublishContext context;
+    context.hotspot = *reinterpret_cast<RED4ext::WeakPtr<void>*>(
+        reinterpret_cast<uintptr_t>(aHotspot) + Addresses::InteractionHotspotSelfHandleOffset);
+    context.hotspotEntityID = *reinterpret_cast<const uint64_t*>(
+        reinterpret_cast<uintptr_t>(aHotspot) + Addresses::InteractionHotspotEntityIDOffset);
+    context.publisher = aPublisher;
+    context.layer = *reinterpret_cast<RED4ext::WeakHandle<RED4ext::ISerializable>*>(
+        reinterpret_cast<uintptr_t>(aLayer) + Addresses::InteractionLayerSelfHandleOffset);
+    context.activator = *reinterpret_cast<RED4ext::WeakPtr<void>*>(
+        reinterpret_cast<uintptr_t>(aActivator) + Addresses::InteractionActivatorSelfHandleOffset);
+    context.capturedAt = std::chrono::steady_clock::now();
+    context.sequence = ++g_publishContextSequence;
 
     std::scoped_lock lock(g_publishContextsMutex);
     for (auto& existing : g_publishContexts)
     {
-        if (existing.hotspot == aHotspot)
+        if (existing.hotspot.instance == aHotspot)
         {
             existing = context;
             return;
@@ -130,7 +181,7 @@ bool FindPublishContext(void* aOwner, PublishContext& aResult)
             continue;
         }
 
-        if (now - context.capturedAt > maxAge || !IsLivePublishContext(context))
+        if (now - context.capturedAt > maxAge)
         {
             context = {};
             continue;
@@ -163,15 +214,9 @@ void PublishInteractionHook(void* aPublisher, SerializableHandle* aEvent,
 
 BuildLootChoice ResolveBuildLootChoice()
 {
+    if (!Addresses::LootHooksVerified) return nullptr;
     static BuildLootChoice resolved = []() -> BuildLootChoice {
-        const auto moduleBase = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
-        if (!moduleBase)
-        {
-            Logging::Error("Loot-choice bridge unavailable: game module base is missing.");
-            return nullptr;
-        }
-
-        const auto address = moduleBase + Addresses::BuildLootChoiceOffset;
+        const auto address = RED4ext::UniversalRelocBase::Resolve(Addresses::BuildLootChoice);
         if (!SignatureMatches(address, Addresses::BuildLootChoiceSignature))
         {
             Logging::Error("Loot-choice bridge disabled: builder signature mismatch.");
@@ -186,16 +231,10 @@ BuildLootChoice ResolveBuildLootChoice()
 
 PublisherBridge ResolvePublisherBridge()
 {
+    if (!Addresses::LootHooksVerified) return {};
     static PublisherBridge resolved = []() -> PublisherBridge {
-        const auto moduleBase = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
-        if (!moduleBase)
-        {
-            Logging::Error("Interaction publisher unavailable: game module base is missing.");
-            return {};
-        }
-
-        const auto buildAddress = moduleBase + Addresses::BuildPublisherChoiceEventOffset;
-        const auto publishAddress = moduleBase + Addresses::PublishInteractionEventOffset;
+        const auto buildAddress = RED4ext::UniversalRelocBase::Resolve(Addresses::BuildPublisherChoiceEvent);
+        const auto publishAddress = RED4ext::UniversalRelocBase::Resolve(Addresses::PublishInteractionEvent);
         if (!SignatureMatches(buildAddress, Addresses::BuildPublisherChoiceEventSignature) ||
             !SignatureMatches(publishAddress, Addresses::PublishInteractionEventSignature))
         {
@@ -217,10 +256,9 @@ bool Attach()
 {
     const auto* sdk = Logging::g_sdk;
     const auto handle = Logging::g_pluginHandle;
-    const auto moduleBase = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
-    if (!sdk || !sdk->hooking || !handle || !moduleBase)
+    if (!sdk || !sdk->hooking || !handle)
     {
-        Logging::Error("Interaction context bridge unavailable: RED4ext hooking API or game module base is missing.");
+        Logging::Error("Interaction context bridge unavailable: RED4ext hooking API is missing.");
         return false;
     }
 
@@ -230,17 +268,40 @@ bool Attach()
         return false;
     }
 
+    const auto processAddress = RED4ext::UniversalRelocBase::Resolve(Addresses::ProcessPublishRequest);
+    const auto releaseAddress = RED4ext::UniversalRelocBase::Resolve(Addresses::ReleaseInteractionReference);
+    if (!SignatureMatches(processAddress, Addresses::ProcessPublishRequestSignature) ||
+        !SignatureMatches(releaseAddress, Addresses::ReleaseInteractionReferenceSignature))
+    {
+        Logging::Error("Loot publication lifetime bridge disabled: signature mismatch.");
+        return false;
+    }
+    g_releaseInteractionReference = reinterpret_cast<ReleaseInteractionReference>(releaseAddress);
+    g_processPublishAddress = reinterpret_cast<void*>(processAddress);
+    if (!sdk->hooking->Attach(handle, g_processPublishAddress,
+                              reinterpret_cast<void*>(&ProcessPublishRequestHook),
+                              reinterpret_cast<void**>(&g_processPublishOriginal)))
+    {
+        g_processPublishAddress = nullptr;
+        Logging::Error("Loot publication lifetime hook failed.");
+        return false;
+    }
+
     g_publishInteractionAddress = reinterpret_cast<void*>(
-        moduleBase + Addresses::PublishInteractionEventOffset);
+        RED4ext::UniversalRelocBase::Resolve(Addresses::PublishInteractionEvent));
     if (!sdk->hooking->Attach(handle, g_publishInteractionAddress,
                               reinterpret_cast<void*>(&PublishInteractionHook),
                               reinterpret_cast<void**>(&g_publishInteractionOriginal)))
     {
+        sdk->hooking->Detach(handle, g_processPublishAddress);
+        g_processPublishAddress = nullptr;
+        g_processPublishOriginal = nullptr;
         g_publishInteractionAddress = nullptr;
         Logging::Error("Interaction context bridge hook failed.");
         return false;
     }
 
+    Logging::Info("Vanilla loot publisher context hook attached (2.5).");
     return true;
 }
 
@@ -254,6 +315,15 @@ void Detach()
         sdk->hooking->Detach(handle, g_publishInteractionAddress);
     }
 
+    if (sdk && sdk->hooking && handle && g_processPublishAddress)
+        sdk->hooking->Detach(handle, g_processPublishAddress);
+    g_processPublishAddress = nullptr;
+    g_processPublishOriginal = nullptr;
+    {
+        std::scoped_lock lock(g_pendingMutex);
+        g_pendingContexts.clear();
+        g_preparedContexts.clear();
+    }
     g_publishInteractionOriginal = nullptr;
     g_publishInteractionAddress = nullptr;
     std::scoped_lock lock(g_publishContextsMutex);
@@ -269,9 +339,33 @@ bool PrepareLootChoiceEvent(
 {
     auto* event = aEvent.GetPtr();
     const auto builder = ResolveBuildLootChoice();
-    if (!event || !builder || !aItemID.IsValid() || aAction.hash == 0)
+    if (!event || !builder || !g_processPublishOriginal || !g_releaseInteractionReference ||
+        !aItemID.IsValid() || aAction.hash == 0)
     {
         return false;
+    }
+
+    auto owner = event->hotspot.Lock();
+    PublishContext context;
+    if (!owner || !FindPublishContext(owner.GetPtr(), context))
+    {
+        Logging::Info("Loot preparation failed: no native context before transfer.");
+        return false;
+    }
+    PreparedContext prepared;
+    prepared.publisher = context.publisher;
+    prepared.ownerID = context.hotspotEntityID;
+    prepared.retained.hotspot = std::make_shared<NativeInteractionReference>(context.hotspot);
+    prepared.retained.activator = std::make_shared<NativeInteractionReference>(context.activator);
+    prepared.layer = context.layer.Lock();
+    if (!prepared.retained.hotspot->instance || !prepared.retained.activator->instance || !prepared.layer)
+    {
+        Logging::Info("Loot preparation failed: native context expired before transfer.");
+        return false;
+    }
+    {
+        std::scoped_lock lock(g_pendingMutex);
+        g_preparedContexts.insert_or_assign(event, std::move(prepared));
     }
 
     LootChoice wrapper{};
@@ -279,7 +373,16 @@ bool PrepareLootChoiceEvent(
     wrapper.itemId = aItemID;
     wrapper.action = aAction;
     builder(&wrapper, &event->choice);
+    Logging::Diagnostic("Vanilla loot choice prepared: action=%llu.",
+                  static_cast<unsigned long long>(aAction.hash));
     return true;
+}
+
+void CancelLootChoiceEvent(
+    const RED4ext::Handle<RED4ext::game::interactions::ChoiceEvent>& aEvent)
+{
+    std::scoped_lock lock(g_pendingMutex);
+    g_preparedContexts.erase(aEvent.GetPtr());
 }
 
 bool PublishLootChoiceEvent(
@@ -288,19 +391,25 @@ bool PublishLootChoiceEvent(
 {
     auto* event = aEvent.GetPtr();
     const auto bridge = ResolvePublisherBridge();
-    if (!event || !bridge.buildEvent || !bridge.publish || aChoiceIndex < 0)
+    if (!event || !bridge.buildEvent || !bridge.publish || !g_processPublishOriginal ||
+        !g_releaseInteractionReference || aChoiceIndex < 0)
     {
         return false;
     }
 
-    auto hotspot = event->hotspot.Lock();
-    PublishContext context;
-    if (!hotspot || !FindPublishContext(hotspot.GetPtr(), context))
+    PreparedContext prepared;
     {
-        Logging::Info("Vanilla loot interaction context unavailable for owner entityID=0x%llX.",
-                      static_cast<unsigned long long>(GetEntityID(hotspot.GetPtr())));
-        return false;
+        std::scoped_lock lock(g_pendingMutex);
+        auto it = g_preparedContexts.find(event);
+        if (it == g_preparedContexts.end())
+        {
+            Logging::Info("Loot publication failed: prepared context unavailable.");
+            return false;
+        }
+        prepared = std::move(it->second);
+        g_preparedContexts.erase(it);
     }
+    auto& retained = prepared.retained;
 
     SerializableHandle publisherEvent;
     auto choiceIndex = static_cast<uint32_t>(aChoiceIndex);
@@ -311,10 +420,17 @@ bool PublishLootChoiceEvent(
         return false;
     }
 
+    retained.event = publisherEvent;
+    {
+        std::scoped_lock lock(g_pendingMutex);
+        g_pendingContexts.emplace(publisherEvent.GetPtr(), retained);
+    }
     g_isReplayingChoice = true;
-    bridge.publish(context.publisher, &publisherEvent, context.hotspot,
-                   context.layer, context.activator);
+    bridge.publish(prepared.publisher, &publisherEvent, retained.hotspot->instance,
+                   prepared.layer.GetPtr(), retained.activator->instance);
     g_isReplayingChoice = false;
+    Logging::Diagnostic("Vanilla loot success notification queued: owner=0x%llX choice=%u.",
+                  static_cast<unsigned long long>(prepared.ownerID), choiceIndex);
     return true;
 }
 }

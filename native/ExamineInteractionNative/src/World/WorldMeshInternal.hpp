@@ -70,6 +70,10 @@ struct WorldMeshProbeStats
     uint32_t foliagePopulationUnavailable{};
     uint32_t foliageNoIntersection{};
     uint32_t foliageSelected{};
+    uint32_t destructibleHidden{};
+    uint32_t destructibleBoundsUnavailable{};
+    uint32_t destructibleTransformsUnavailable{};
+    uint32_t destructibleSelected{};
 };
 
 RED4ext::worldNode* GetWorldNodeDefinition(RED4ext::worldINodeInstance* aNodeInstance);

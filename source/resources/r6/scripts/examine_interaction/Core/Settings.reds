@@ -1,5 +1,7 @@
 module MisterChedda.ExamineInteraction
 
+import MisterChedda.ExamineInteraction.Native.SetDiagnosticLogging
+
 public class ExamineInteractionSettings extends ScriptableSystem {
   @runtimeProperty("ModSettings.mod", "UI_MisterChedda_Examine_ModName")
   @runtimeProperty("ModSettings.category", "UI_MisterChedda_Examine_Category_General")
@@ -132,23 +134,30 @@ public class ExamineInteractionSettings extends ScriptableSystem {
   private func OnAttach() -> Void {
     ModSettings.RegisterListenerToClass(this);
     ModSettings.RegisterListenerToModifications(this);
+    SetDiagnosticLogging(this.diagnosticLogging);
   }
 
   @if(!ModuleExists("ModSettingsModule"))
-  private func OnAttach() -> Void {}
+  private func OnAttach() -> Void {
+    SetDiagnosticLogging(this.diagnosticLogging);
+  }
 
   @if(ModuleExists("ModSettingsModule"))
   private func OnDetach() -> Void {
+    SetDiagnosticLogging(false);
     ModSettings.UnregisterListenerToClass(this);
     ModSettings.UnregisterListenerToModifications(this);
   }
 
   @if(!ModuleExists("ModSettingsModule"))
-  private func OnDetach() -> Void {}
+  private func OnDetach() -> Void {
+    SetDiagnosticLogging(false);
+  }
 
   @if(ModuleExists("ModSettingsModule"))
   private func OnModSettingsChange() -> Void {
     let service = ExamineInteractionService.Get();
+    SetDiagnosticLogging(this.diagnosticLogging);
     if IsDefined(service) {
       service.OnSettingsChanged();
     }

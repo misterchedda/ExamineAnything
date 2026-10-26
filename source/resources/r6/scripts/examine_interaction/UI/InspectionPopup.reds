@@ -1587,8 +1587,7 @@ public class ExamineInteractionPopup extends CustomPopup {
     this.m_keyInputHandler = GameInstance.GetCallbackSystem()
       .RegisterCallback(n"Input/Key", this, n"OnExamineKeyInput");
     this.m_keyInputHandler
-      .AddTarget(InputTarget.Key(EInputKey.IK_LeftMouse, EInputAction.IACT_Press))
-      .AddTarget(InputTarget.Key(EInputKey.IK_LeftMouse, EInputAction.IACT_Release));
+      .AddTarget(InputTarget.Key(EInputKey.IK_LeftMouse));
 
     this.m_axisInputHandler = GameInstance.GetCallbackSystem()
       .RegisterCallback(n"Input/Axis", this, n"OnExamineAxisInput");
@@ -1720,8 +1719,7 @@ public class ExamineInteractionPopup extends CustomPopup {
       }
       if NotEquals(this.m_actionContext.choices[i].rawInputKey, EInputKey.IK_None) {
         this.m_keyInputHandler.AddTarget(InputTarget.Key(
-          this.m_actionContext.choices[i].rawInputKey,
-          EInputAction.IACT_Release
+          this.m_actionContext.choices[i].rawInputKey
         ));
       }
       i += 1;
@@ -2187,7 +2185,7 @@ public class ExamineInteractionPopup extends CustomPopup {
       this.ApplyPreviewTransformTo(this.m_transactionPreviewOwner);
       this.FinalizePreview(this.m_transactionPreviewEntity);
       cameraEuler = Quaternion.ToEulerAngles(this.m_cameraOrientation);
-      FTLog(s"[ExamineInteraction] Inspection mode opened with engine-assembled item: id=\(EntityID.ToDebugString(this.m_previewEntityID)) appearance=\(NameToString(this.m_transactionPreviewEntity.GetCurrentAppearanceName())) weaponPresentation=\(this.m_assembledWeaponPreview) cameraPitch=\(cameraEuler.Pitch) cameraYaw=\(cameraEuler.Yaw)");
+      ExamineInteractionLog.Diagnostic(s"[ExamineInteraction] Inspection mode opened with engine-assembled item: id=\(EntityID.ToDebugString(this.m_previewEntityID)) appearance=\(NameToString(this.m_transactionPreviewEntity.GetCurrentAppearanceName())) weaponPresentation=\(this.m_assembledWeaponPreview) cameraPitch=\(cameraEuler.Pitch) cameraYaw=\(cameraEuler.Yaw)");
       return;
     }
 
@@ -2243,7 +2241,7 @@ public class ExamineInteractionPopup extends CustomPopup {
         this.CopyWorldEntityRuntimeState(preview);
         this.FinalizePreview(preview);
       }
-      FTLog(s"[ExamineInteraction] Inspection mode opened: id=\(EntityID.ToDebugString(previewID)) template=\(ResRef.ToString(spec.templatePath)) appearance=\(NameToString(spec.appearanceName)) cameraPitch=\(cameraEuler.Pitch) cameraYaw=\(cameraEuler.Yaw)");
+      ExamineInteractionLog.Diagnostic(s"[ExamineInteraction] Inspection mode opened: id=\(EntityID.ToDebugString(previewID)) template=\(ResRef.ToString(spec.templatePath)) appearance=\(NameToString(spec.appearanceName)) cameraPitch=\(cameraEuler.Pitch) cameraYaw=\(cameraEuler.Yaw)");
     } else {
       FTLog("[ExamineInteraction] Preview spawn failed: StaticEntitySystem returned an undefined EntityID.");
     }
@@ -3124,6 +3122,6 @@ public class ExamineInteractionPopup extends CustomPopup {
     this.m_framedDistance = 0.0;
     this.m_environmentHitDistance = 0.0;
     this.m_previewBoundsPrepared = false;
-    FTLog("[ExamineInteraction] Inspection mode closed and preview despawned.");
+    ExamineInteractionLog.Diagnostic("[ExamineInteraction] Inspection mode closed and preview despawned.");
   }
 }

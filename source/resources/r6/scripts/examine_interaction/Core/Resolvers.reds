@@ -101,7 +101,7 @@ public abstract class ExamineInteractionClothingFactory {
       TDBID.Create("UIIcon." + iconNameText)
     );
     if IsDefined(iconRecord) {
-      FTLog(s"[ExamineInteraction] Clothing external-appearance icon validated: item=\(TDBID.ToStringDEBUG(ItemID.GetTDBID(itemID))) base=\(NameToString(baseAppearance)) gender=\(NameToString(gender)) icon=\(iconNameText)");
+      ExamineInteractionLog.Diagnostic(s"[ExamineInteraction] Clothing external-appearance icon validated: item=\(TDBID.ToStringDEBUG(ItemID.GetTDBID(itemID))) base=\(NameToString(baseAppearance)) gender=\(NameToString(gender)) icon=\(iconNameText)");
     }
     return IsDefined(iconRecord);
   }
@@ -145,7 +145,7 @@ public abstract class ExamineInteractionClothingFactory {
         return appearances[i].name;
       }
       if Equals(appearances[i].appearanceName, candidate) {
-        FTLog(s"[ExamineInteraction] Clothing external appearance mapped to entity selector: candidate=\(NameToString(candidate)) selector=\(NameToString(appearances[i].name)) resource=\(ResRef.ToString(ResourceAsyncRef.GetPath(appearances[i].appearanceResource)))");
+        ExamineInteractionLog.Diagnostic(s"[ExamineInteraction] Clothing external appearance mapped to entity selector: candidate=\(NameToString(candidate)) selector=\(NameToString(appearances[i].name)) resource=\(ResRef.ToString(ResourceAsyncRef.GetPath(appearances[i].appearanceResource)))");
         return appearances[i].name;
       }
       i += 1;
@@ -169,6 +169,7 @@ public abstract class ExamineInteractionClothingFactory {
   }
 
   private static func LogExternalAppearanceMappings(template: ref<entEntityTemplate>, baseAppearance: CName) -> Void {
+    let includeResource: ResourceRef;
     let appearances: array<entTemplateAppearance>;
     let baseText = StrLower(NameToString(baseAppearance));
     let i: Int32;
@@ -181,13 +182,13 @@ public abstract class ExamineInteractionClothingFactory {
     }
 
     appearances = template.appearances;
-    FTLog(s"[ExamineInteraction] Clothing external-appearance mapping probe: rootEntries=\(ArraySize(appearances)) includes=\(ArraySize(template.includes)) base=\(NameToString(baseAppearance))");
+    ExamineInteractionLog.Diagnostic(s"[ExamineInteraction] Clothing external-appearance mapping probe: rootEntries=\(ArraySize(appearances)) includes=\(ArraySize(template.includes)) base=\(NameToString(baseAppearance))");
     while i < ArraySize(appearances) {
       selectorText = NameToString(appearances[i].name);
       mappedText = NameToString(appearances[i].appearanceName);
       if StrFindFirst(StrLower(selectorText), baseText) >= 0
         || StrFindFirst(StrLower(mappedText), baseText) >= 0 {
-        FTLog(s"[ExamineInteraction] Clothing appearance entry probe: selector=\(selectorText) mapped=\(mappedText) resource=\(ResRef.ToString(ResourceAsyncRef.GetPath(appearances[i].appearanceResource)))");
+        ExamineInteractionLog.Diagnostic(s"[ExamineInteraction] Clothing appearance entry probe: selector=\(selectorText) mapped=\(mappedText) resource=\(ResRef.ToString(ResourceAsyncRef.GetPath(appearances[i].appearanceResource)))");
       }
       i += 1;
     }
@@ -195,7 +196,8 @@ public abstract class ExamineInteractionClothingFactory {
     includes = template.includes;
     i = 0;
     while i < ArraySize(includes) {
-      FTLog(s"[ExamineInteraction] Clothing appearance include probe: path=\(ResRef.ToString(ResourceAsyncRef.GetPath(includes[i].template))) loaded=\(ResourceRef.IsLoaded(ResourceRef.FromPath(ResourceAsyncRef.GetPath(includes[i].template))))");
+      includeResource = ResourceRef.FromPath(ResourceAsyncRef.GetPath(includes[i].template));
+      ExamineInteractionLog.Diagnostic(s"[ExamineInteraction] Clothing appearance include probe: path=\(ResRef.ToString(ResourceAsyncRef.GetPath(includes[i].template))) loaded=\(ResourceRef.IsLoaded(includeResource))");
       i += 1;
     }
   }

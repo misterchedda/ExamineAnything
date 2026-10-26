@@ -44,11 +44,13 @@ struct RenderStateBackup
     bool featureEnabled{};
 };
 
-using RenderNodeExecute = void (*)(void*, void*);
+// Execute(this, const SRenderNodeImplContext&, job::Builder*).
+using RenderNodeExecute = void (*)(void*, void*, void*);
 
 OverrideState s_override;
 std::atomic<uint32_t> s_hookMask{};
-uintptr_t s_gameModuleBase{};
+uintptr_t s_depthOfFieldAddress{};
+uintptr_t s_combinedBlursAddress{};
 RenderNodeExecute s_depthOfFieldSeparableOriginal{};
 RenderNodeExecute s_combinedBlursOriginal{};
 
@@ -139,6 +141,11 @@ bool TryApplyRenderState(void* aNodeContext, RenderStateBackup& aBackup)
         aBackup.useNearPlane = *useNearPlane;
         aBackup.useFarPlane = *useFarPlane;
 
+        // Reject unsupported contexts before changing any DOF values.
+        if (!TrySetRenderFeature(aNodeContext, Addresses::DofSeparableFeatureBit, true,
+                                 aBackup.featureEnabled))
+            return false;
+
         *intensity = s_override.intensity.load(std::memory_order_relaxed);
         *nearBlur = s_override.nearBlur.load(std::memory_order_relaxed);
         *nearFocus = s_override.nearFocus.load(std::memory_order_relaxed);
@@ -146,8 +153,7 @@ bool TryApplyRenderState(void* aNodeContext, RenderStateBackup& aBackup)
         *farFocus = s_override.farFocus.load(std::memory_order_relaxed);
         *useNearPlane = s_override.useNearPlane.load(std::memory_order_relaxed) ? 1u : 0u;
         *useFarPlane = s_override.useFarPlane.load(std::memory_order_relaxed) ? 1u : 0u;
-        return TrySetRenderFeature(aNodeContext, Addresses::DofSeparableFeatureBit, true,
-                                   aBackup.featureEnabled);
+        return true;
     }
     __except (EXCEPTION_EXECUTE_HANDLER)
     {
@@ -187,7 +193,7 @@ void RestoreRenderState(void* aNodeContext, const RenderStateBackup& aBackup)
     }
 }
 
-void DepthOfFieldSeparableHook(void* aParam1, void* aNodeContext)
+void DepthOfFieldSeparableHook(void* aParam1, void* aNodeContext, void* aJobBuilder)
 {
     RenderStateBackup backup{};
     const bool patched = s_override.active.load(std::memory_order_acquire) &&
@@ -195,7 +201,7 @@ void DepthOfFieldSeparableHook(void* aParam1, void* aNodeContext)
 
     if (s_depthOfFieldSeparableOriginal)
     {
-        s_depthOfFieldSeparableOriginal(aParam1, aNodeContext);
+        s_depthOfFieldSeparableOriginal(aParam1, aNodeContext, aJobBuilder);
     }
 
     if (patched)
@@ -204,7 +210,7 @@ void DepthOfFieldSeparableHook(void* aParam1, void* aNodeContext)
     }
 }
 
-void CombinedBlursHook(void* aParam1, void* aNodeContext)
+void CombinedBlursHook(void* aParam1, void* aNodeContext, void* aJobBuilder)
 {
     bool previous = false;
     const bool patched = s_override.active.load(std::memory_order_acquire) &&
@@ -213,7 +219,7 @@ void CombinedBlursHook(void* aParam1, void* aNodeContext)
 
     if (s_combinedBlursOriginal)
     {
-        s_combinedBlursOriginal(aParam1, aNodeContext);
+        s_combinedBlursOriginal(aParam1, aNodeContext, aJobBuilder);
     }
 
     if (patched)
@@ -224,50 +230,51 @@ void CombinedBlursHook(void* aParam1, void* aNodeContext)
 }
 
 template<std::size_t N>
-bool AttachHook(const char* aName, uintptr_t aOffset,
+bool AttachHook(const char* aName, uintptr_t aAddress,
                 const std::array<uint8_t, N>& aSignature, void* aHook,
                 void** aOriginal, uint32_t aMask)
 {
     const auto* sdk = Logging::g_sdk;
     const auto handle = Logging::g_pluginHandle;
-    if (!sdk || !sdk->hooking || !handle || !s_gameModuleBase)
+    if (!sdk || !sdk->hooking || !handle || !aAddress)
     {
-        Logging::Error("%s unavailable: RED4ext hooking API or game module base is missing.", aName);
+        Logging::Error("%s unavailable: RED4ext hooking API or resolved function address is missing.", aName);
         return false;
     }
 
-    const auto address = s_gameModuleBase + aOffset;
+    const auto address = aAddress;
     if (!SignatureMatches(address, aSignature))
     {
-        Logging::Error("%s disabled: signature mismatch at module+0x%llX.", aName,
-                       static_cast<unsigned long long>(aOffset));
+        Logging::Error("%s disabled: signature mismatch at address 0x%llX.", aName,
+                       static_cast<unsigned long long>(aAddress));
         return false;
     }
 
     if (!sdk->hooking->Attach(handle, reinterpret_cast<void*>(address), aHook, aOriginal))
     {
-        Logging::Error("%s attach failed at module+0x%llX.", aName,
-                       static_cast<unsigned long long>(aOffset));
+        Logging::Error("%s attach failed at address 0x%llX.", aName,
+                       static_cast<unsigned long long>(aAddress));
         return false;
     }
 
     s_hookMask.fetch_or(aMask, std::memory_order_relaxed);
-    Logging::Info("Attached %s at module+0x%llX.", aName,
-                  static_cast<unsigned long long>(aOffset));
+    Logging::Info("Attached %s at address 0x%llX.", aName,
+                  static_cast<unsigned long long>(aAddress));
     return true;
 }
 }
 
 bool Attach()
 {
-    s_gameModuleBase = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+    s_depthOfFieldAddress = RED4ext::UniversalRelocBase::Resolve(Addresses::DepthOfFieldSeparable);
+    s_combinedBlursAddress = RED4ext::UniversalRelocBase::Resolve(Addresses::CombinedBlurs);
     const bool separable = AttachHook(
-        "native DOF separable override", Addresses::DepthOfFieldSeparableOffset,
+        "native DOF separable override", s_depthOfFieldAddress,
         Addresses::DepthOfFieldSeparableSignature,
         reinterpret_cast<void*>(&DepthOfFieldSeparableHook),
         reinterpret_cast<void**>(&s_depthOfFieldSeparableOriginal), DepthOfFieldHookMask);
     const bool combined = AttachHook(
-        "native combined-DOF compositor override", Addresses::CombinedBlursOffset,
+        "native combined-DOF compositor override", s_combinedBlursAddress,
         Addresses::CombinedBlursSignature, reinterpret_cast<void*>(&CombinedBlursHook),
         reinterpret_cast<void**>(&s_combinedBlursOriginal), CombinedBlursHookMask);
     return separable && combined;
@@ -278,24 +285,25 @@ void Detach()
     s_override.active.store(false, std::memory_order_release);
     const auto* sdk = Logging::g_sdk;
     const auto handle = Logging::g_pluginHandle;
-    if (sdk && sdk->hooking && handle && s_gameModuleBase)
+    if (sdk && sdk->hooking && handle)
     {
         if ((s_hookMask.load(std::memory_order_relaxed) & CombinedBlursHookMask) != 0)
         {
             sdk->hooking->Detach(handle,
-                reinterpret_cast<void*>(s_gameModuleBase + Addresses::CombinedBlursOffset));
+                reinterpret_cast<void*>(s_combinedBlursAddress));
         }
         if ((s_hookMask.load(std::memory_order_relaxed) & DepthOfFieldHookMask) != 0)
         {
             sdk->hooking->Detach(handle,
-                reinterpret_cast<void*>(s_gameModuleBase + Addresses::DepthOfFieldSeparableOffset));
+                reinterpret_cast<void*>(s_depthOfFieldAddress));
         }
     }
 
     s_hookMask.store(0, std::memory_order_relaxed);
     s_depthOfFieldSeparableOriginal = nullptr;
     s_combinedBlursOriginal = nullptr;
-    s_gameModuleBase = 0;
+    s_depthOfFieldAddress = 0;
+    s_combinedBlursAddress = 0;
 }
 
 bool Set(float aIntensity, float aNearBlur, float aNearFocus, float aFarBlur,
@@ -315,24 +323,21 @@ bool Set(float aIntensity, float aNearBlur, float aNearFocus, float aFarBlur,
     s_override.farFocus.store(aFarFocus, std::memory_order_relaxed);
     s_override.useNearPlane.store(aUseNearPlane, std::memory_order_relaxed);
     s_override.useFarPlane.store(aUseFarPlane, std::memory_order_relaxed);
-    s_override.active.store(true, std::memory_order_release);
-#if EXAMINE_INTERACTION_PROFILE_NATIVE
-    Logging::Info("Native DOF override enabled: intensity=%.3f near=(%.3f, %.3f, %u) far=(%.3f, %.3f, %u).",
+    const bool wasActive = s_override.active.exchange(true, std::memory_order_acq_rel);
+    if (!wasActive)
+        Logging::Diagnostic("Native DOF override enabled: intensity=%.3f near=(%.3f, %.3f, %u) far=(%.3f, %.3f, %u).",
                   aIntensity, aNearBlur, aNearFocus, aUseNearPlane ? 1u : 0u,
                   aFarBlur, aFarFocus, aUseFarPlane ? 1u : 0u);
-#endif
     return true;
 }
 
 bool Reset()
 {
-    [[maybe_unused]] const bool wasActive = s_override.active.exchange(false, std::memory_order_acq_rel);
-#if EXAMINE_INTERACTION_PROFILE_NATIVE
+    const bool wasActive = s_override.active.exchange(false, std::memory_order_acq_rel);
     if (wasActive)
     {
-        Logging::Info("Native DOF override released.");
+        Logging::Diagnostic("Native DOF override released.");
     }
-#endif
     return wasActive;
 }
 }

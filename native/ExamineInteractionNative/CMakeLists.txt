@@ -34,8 +34,8 @@ if(RED4EXT_SDK_ROOT)
 else()
     FetchContent_Declare(
         RED4extSDK
-        GIT_REPOSITORY https://github.com/misterchedda/RED4ext.SDK.git
-        GIT_TAG 0d1738eabfbaf5913d1395920abc3f7115685447
+        GIT_REPOSITORY https://github.com/wopss/RED4ext.SDK.git
+        GIT_TAG 5246e659d783e5834cc08a90e56c8932c9ed3449
         GIT_SHALLOW FALSE
         SOURCE_SUBDIR cmake/fetch-only
     )
@@ -51,7 +51,7 @@ endif()
 FetchContent_Declare(
     RedLib
     GIT_REPOSITORY https://github.com/psiberx/cp2077-red-lib.git
-    GIT_TAG 009d404d0ed96c7bfce8e937cc1cc97cc13b1c5f
+    GIT_TAG 398a7104a5aa60765db7221ddcaa48c6686d12ae
     GIT_SHALLOW FALSE
 )
 FetchContent_MakeAvailable(RedLib)
@@ -109,3 +109,6 @@ set_target_properties(ExamineInteractionNative PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
     ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
 )
+
+# Ensure the SDK RTTI declarations precede generated native headers.
+target_precompile_headers(ExamineInteractionNative PRIVATE <RED4ext/RED4ext.hpp>)
